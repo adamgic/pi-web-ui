@@ -1,0 +1,130 @@
+# Pi Web UI
+
+A browser interface for the **same session as your Pi terminal**, packaged as an independent Pi extension. It uses Pi's public extension APIs and ordinary session storage. There is no durable engine, separate agent process, build step, or dependency on a Pi source checkout.
+
+Tested against `@earendil-works/pi-coding-agent` 1.1.0. Requires Node.js 22.19+ and Pi installed on your PATH. This package has no additional runtime dependencies.
+
+## Quick start
+
+From the workspace where you want Pi to work, run:
+
+```sh
+sh ./pi-web-ui/start.sh
+```
+
+This starts the Pi terminal with the extension and opens your default browser. It preserves your working directory. If the extension is elsewhere, use the corresponding path to `start.sh`.
+
+Equivalent command:
+
+```sh
+pi --extension ./pi-web-ui/src/extension.js --web-ui
+```
+
+The server chooses a free loopback port. Optional arguments are forwarded to Pi:
+
+```sh
+sh ./pi-web-ui/start.sh --continue
+sh ./pi-web-ui/start.sh --web-ui-port 4317
+sh ./pi-web-ui/start.sh --web-ui-no-open
+```
+
+If Pi is not installed, install `@earendil-works/pi-coding-agent` using your preferred package manager. Alternatively, `PI_BIN` selects an existing Pi executable. In the original development workspace, the adjacent Pi checkout can be used explicitly:
+
+```sh
+PI_BIN=./pi/pi-test.sh sh ./pi-web-ui/start.sh
+```
+
+That checkout needs its own dependencies and model metadata prepared. The extension does not automatically find or modify sibling repositories.
+
+## Install as a Pi package
+
+For persistent installation, from the parent directory:
+
+```sh
+pi install ./pi-web-ui
+```
+
+Then start Pi normally and enter `/web`. To open the browser automatically at startup:
+
+```sh
+pi --web-ui
+```
+
+The `pi.extensions` field in [package.json](package.json) points to the extension entry file. Once this repository is hosted, Pi can install it with `pi install git:github.com/OWNER/REPOSITORY`. No upstream Pi PR or fork is required. For npm distribution, the package includes `src/`, `public/`, both launchers, this README, and the license; tests and output are excluded.
+
+## Commands and controls
+
+Terminal commands:
+
+| Command | Behavior |
+| --- | --- |
+| `/web` or `/web open` | Start the server if necessary and open the browser. |
+| `/web url` | Start if necessary and display the launch URL without opening it. |
+| `/web stop` | Close browser connections and stop the server; Pi keeps running. |
+
+Browser controls:
+
+| Control | Behavior |
+| --- | --- |
+| Enter / Send | Send a prompt, or steer active work. |
+| Shift+Enter | Insert a newline. |
+| Alt+Enter / Follow-up | Queue a prompt after the current run. |
+| Escape / Stop / `/abort` | Request cancellation through Pi. |
+| Alt+M / Model / `/model` | Select an authenticated model while idle. |
+| Alt+T / Thinking / `/thinking` | Cycle thinking levels; Pi clamps to the model's capabilities. |
+| Compact / `/compact [instructions]` | Compact context when idle. |
+| Alt+O | Expand or collapse tool and reasoning details. |
+| `/help` | Show browser shortcuts. |
+
+The browser displays the active session branch, streaming responses and reasoning, tool arguments/results, compaction summaries, model selection, token/cost estimates, and available tools. Queued work is indicated; the public extension API does not expose the full queue text. Pending messages appear in the transcript when Pi consumes them.
+
+Light and dark appearance follow the OS/browser preference, including live changes. The page fits normal window sizes; the transcript scrolls within its panel. At widths of 440px or less, or heights of 560px or less, vertical page scrolling is enabled.
+
+## Authentication and terminal interactions
+
+Run `/login` **in the Pi terminal** to authenticate your provider, then open the browser model picker. It refreshes the available models from Pi. Provider credentials remain managed by Pi; the extension does not implement a second login flow or send credentials to browser JavaScript.
+
+Use the terminal for `/resume`, `/new`, `/tree`, `/reload`, custom extension commands, permission dialogs, and other terminal UI interactions. The browser provides its own small command set. Unknown slash commands receive guidance and are never forwarded as model prompts, including through the follow-up button.
+
+The extension does not replicate arbitrary terminal widgets, browser file uploads, or durable task/subagent navigation. It shows the active Pi session. This is a browser frontend for an ordinary Pi session, with the terminal available for the remaining workflows.
+
+## Session lifecycle
+
+Closing a tab leaves Pi running. Multiple tabs share the same session; each keeps its own draft. Reconnecting retrieves a fresh snapshot and does not resend prompts.
+
+Pi controls history persistence. A normal saved session can be resumed with `pi --continue`; in-memory sessions follow Pi's own semantics. Interrupted model calls and tools do not gain durable recovery from this extension.
+
+Session replacement, reload, and shutdown close the old server and connections. With `--web-ui`, a subsequent interactive session start opens a new server automatically. Otherwise run `/web` again. Old tabs need the new launch URL, which has a fresh token. `/web stop` leaves the terminal session active.
+
+## Local transport
+
+The server binds only to `127.0.0.1`. The launch URL contains a random access token in its fragment. Browser JavaScript moves it to tab-scoped session storage and removes the fragment from the address bar. API requests use an authorization header; host/origin validation and a restrictive content security policy protect the local endpoint. Anyone with the launch URL can control this session; treat it as private.
+
+Commands have identifiers for bounded replay protection within the server process. Streaming uses server-sent events (SSE): HTTP responses that carry successive session snapshots. Full snapshots simplify reconnects; this is not optimized for extremely large histories. Slow connections with excessive queued output are disconnected and reconnect automatically. Live tool previews retain the last 64,000 characters; completed results come from Pi's session history.
+
+## Implementation
+
+| File | Responsibility |
+| --- | --- |
+| [src/extension.js](src/extension.js) | Registers `/web`, CLI flags, Pi event listeners, browser launch, and cleanup. No server starts during extension registration. |
+| [src/bridge.mjs](src/bridge.mjs) | Maps public Pi session APIs/events into browser snapshots and validates browser actions. Handles the gap between `message_end` and session persistence. |
+| [src/server.mjs](src/server.mjs) | Serves fixed static assets, authenticated commands, current state, and SSE updates. |
+| [public/app.js](public/app.js) | Browser rendering, dialogs, keyboard controls, safe text/Markdown rendering, and reconnects. |
+| [public/view.js](public/view.js) | Pure transcript and usage projections from ordinary Pi session entries. |
+| [public/index.html](public/index.html), [public/style.css](public/style.css) | Accessible interface structure, responsive layout, and OS theme selection. |
+| [start.mjs](start.mjs), [start.sh](start.sh) | Launch the installed Pi executable with this extension enabled. |
+| [test](test) | Fake-host unit/HTTP tests and a real Chromium browser check. |
+
+The browser assets and transport were adapted from the existing MIT-licensed Pi durable web UI. The backend now uses ordinary extension/session APIs; there are no imports from Pi's experimental adapter or fork internals.
+
+## Verification
+
+From this package's repository checkout:
+
+```sh
+npm run check
+node --test test/*.test.mjs
+node test/browser.mjs
+```
+
+The browser check uses Chrome's DevTools protocol directly, without an additional testing dependency. It defaults to the macOS Google Chrome path; set `CHROME_PATH` elsewhere. It saves screenshots/results under [output](output) and retains its disposable browser profile under `temp/`.
