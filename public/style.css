@@ -77,4 +77,25 @@
 @media(max-width:1050px){.workspace{grid-template-columns:210px minmax(0,1fr)}.conversation-bar{padding:17px 22px;align-items:flex-start;flex-direction:column;gap:12px}.toolbar{width:100%}.toolbar button:first-child{max-width:45%;flex:1}.compose-hint{display:none}.composer-bottom{justify-content:flex-end}.suggestions{flex-wrap:wrap}.topbar{padding:0 20px}}
 @media(max-width:700px){.app{grid-template-rows:60px minmax(0,1fr)}.workspace{grid-template-columns:minmax(0,1fr)}.sidebar{display:none}.conversation-bar{flex-direction:row;align-items:center;padding:12px 18px;flex-wrap:wrap}.toolbar{width:auto;flex:1;justify-content:flex-end}.toolbar button{padding:7px}.toolbar button:first-child{max-width:160px}.transcript{padding:20px}.composer{margin:6px 14px 0}.statusbar{padding:11px 16px}.transcript-actions{padding:0 14px}.topbar{gap:12px}.welcome-mark{margin-bottom:12px}.welcome h2{font-size:30px}.welcome p br{display:none}.suggestions{margin-top:20px}.queue{margin:4px 14px}.connection{font-size:10px}#help span{display:none}}
 @media(max-width:440px),(max-height:560px){body{overflow-y:auto;overflow-x:hidden}.app{height:auto;min-height:100dvh;grid-template-rows:auto 1fr}.topbar{min-height:60px}.workspace{min-height:650px}.sidebar{display:none}.workspace{grid-template-columns:minmax(0,1fr)}main{grid-template-rows:auto auto minmax(260px,1fr) auto auto auto auto}.transcript{min-height:260px;max-height:65dvh}.conversation-bar{flex-direction:column;align-items:stretch;gap:12px;padding:14px 18px}.toolbar{width:100%;justify-content:flex-start}.toolbar button:first-child{max-width:none}.toolbar button{font-size:11px}.composer-bottom{padding:0 9px 10px}.compose-buttons button{padding:7px 9px}.statusbar{flex-wrap:wrap}.welcome{padding:15px 0}.welcome h2{font-size:28px}.suggestions{display:grid;gap:7px;width:100%}.suggestions button{text-align:left}.connection{max-width:120px}.brand strong{font-size:13px}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+#status.working {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--accent);
+  background: linear-gradient(100deg, var(--muted) 20%, var(--accent) 40%, var(--text) 50%, var(--accent) 60%, var(--muted) 80%);
+  background-size: 240% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-shimmer 1.8s linear infinite;
+}
+@keyframes thinking-shimmer {
+  from { background-position: 140% 0; }
+  to { background-position: -100% 0; }
+}
+@media(prefers-reduced-motion:reduce){
+  *{transition:none!important;scroll-behavior:auto!important}
+  #status.working{animation:none;background:none;-webkit-text-fill-color:currentColor}
+}
+@media(forced-colors:active){
+  #status.working{animation:none;background:none;color:CanvasText;-webkit-text-fill-color:currentColor}
+}
