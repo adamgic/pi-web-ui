@@ -68,7 +68,7 @@ Browser controls:
 | --- | --- |
 | Enter / Send | Send a prompt, or steer active work. |
 | Shift+Enter | Insert a newline. |
-| Arrow Up / Arrow Down | Browse older/newer prompts. Down past the newest prompt restores your unsent draft (or empty input), including its cursor position. Works even after you have started typing. |
+| Arrow Up / Arrow Down | Move within multiline input first. Up on the first line browses older prompts; Down on the last line browses newer prompts, then restores your unsent draft (or empty input), including its cursor position. |
 | Alt+Enter / Follow-up | Queue a prompt after the current run. |
 | Escape / Stop / `/abort` | Request cancellation through Pi. |
 | Alt+M / Model / `/model` | Select an authenticated model while idle. |
@@ -79,7 +79,7 @@ Browser controls:
 
 The browser displays the active session branch, streaming responses and reasoning, tool arguments/results, compaction summaries, model selection, token/cost estimates, and available tools. Queued work is indicated; the public extension API does not expose the full queue text. Pending messages appear in the transcript when Pi consumes them.
 
-Prompt history comes from the active session and includes prompts accepted from this tab that are still queued. While browsing, edits to recalled prompts are kept for that navigation pass; returning to your draft restores the original unsent text. History is held steady during navigation so streaming updates do not move your position. Modified arrow keys retain their normal text-editing behavior.
+Prompt history comes from the active session and includes prompts accepted from this tab that are still queued. Switching history items preserves the cursor's character column, clamped to the destination line's length. Up enters the last line; Down enters the first line. While browsing, edits to recalled prompts are kept for that navigation pass; returning to your draft restores the original unsent text and saved cursor position. History is held steady during navigation so streaming updates do not move your position. Modified arrow keys retain their normal text-editing behavior.
 
 Light and dark appearance follow the OS/browser preference, including live changes. The page fits normal window sizes; the transcript scrolls within its panel. At widths of 440px or less, or heights of 560px or less, vertical page scrolling is enabled.
 
