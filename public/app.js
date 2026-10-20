@@ -5,8 +5,10 @@ const fragment = new URLSearchParams(location.hash.slice(1));
 const token = fragment.get('token') || sessionStorage.getItem('pi-web-token');
 if (fragment.has('token')) { sessionStorage.setItem('pi-web-token', token); history.replaceState(null, '', location.pathname); }
 let view, online = false, pending = false, expanded = false, lastTranscript = '';
-let localError = '', selectedConversation;
+let localError = '', selectedConversation, submitting = false;
 const drafts = new Map();
+const submittedPrompts = new Map();
+let historyNavigation;
 const opened = new Map();
 const transcript = $('transcript');
 const welcome = transcript.firstElementChild;
@@ -109,6 +111,10 @@ function controls() {
     $('compact').disabled = !online || pending || view.busy || view.compacting || view.pendingMessages;
     $('model').disabled = !online || pending || view.busy || view.compacting;
   }
+  const working = online && Boolean(submitting || view?.busy || view?.compacting);
+  const label = !online ? 'Disconnected' : view?.compacting ? 'Compacting…' : working ? 'Thinking…' : 'Ready';
+  if ($('status').textContent !== label) $('status').textContent = label;
+  $('status').classList.toggle('working', working);
 }
 function alerts() {
   $('alerts').replaceChildren();
@@ -117,7 +123,8 @@ function alerts() {
 function render() {
   const id = view.session.id;
   if (id !== selectedConversation) {
-    if (selectedConversation !== undefined) drafts.set(selectedConversation, prompt.value);
+    if (selectedConversation !== undefined) drafts.set(selectedConversation, historyNavigation?.draft.text ?? prompt.value);
+    historyNavigation = undefined;
     prompt.value = drafts.get(id) || '';
     selectedConversation = id; following = true; opened.clear();
   }
@@ -130,7 +137,6 @@ function render() {
   $('model').textContent = view.model?.modelId || 'Select model';
   $('model').title = view.model ? `${view.model.provider}/${view.model.modelId}` : 'Choose a model';
   $('thinking').textContent = `Thinking: ${view.thinkingLevel || 'off'}`;
-  $('status').textContent = view.compacting ? 'Compacting…' : view.busy ? 'Working…' : 'Ready';
   const usage = usageOf(view);
   const format = number => Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(number);
   const model = view.models.find(m => m.provider === view.model?.provider && m.modelId === view.model?.modelId);
@@ -150,10 +156,11 @@ async function command(action, payload = {}) {
 async function run(action, payload) {
   if (!online || (pending && action !== 'abort')) return false;
   if (action !== 'abort') pending = true;
+  if (action === 'submit') submitting = true;
   localError = ''; alerts(); controls();
   try { await command(action, payload); return true; }
   catch (error) { localError = `Unable to confirm command: ${error.message} Check the transcript before retrying.`; alerts(); return false; }
-  finally { if (action !== 'abort') pending = false; controls(); }
+  finally { if (action !== 'abort') pending = false; if (action === 'submit') submitting = false; controls(); }
 }
 async function showModels() {
   if (!view) return;
@@ -187,11 +194,15 @@ async function submit(mode = 'steer') {
     else if (text === '/abort') { if (!await run('abort')) return; }
     else if (/^\/compact(?:\s|$)/.test(text)) { if (!await run('compact', { instructions: text.slice(8).trim() })) return; }
     else { localError = 'Run /login and other Pi commands in the terminal. Use /help for browser commands.'; alerts(); return; }
-    prompt.value = ''; return;
+    prompt.value = ''; historyNavigation = undefined; return;
   }
   const id = selectedConversation;
+  const historyLength = transcriptOf(view).filter(item => item.type === 'user').length;
   if (await run('submit', { text, whenBusy: mode })) {
-    if (selectedConversation === id && prompt.value === before) prompt.value = '';
+    const submitted = submittedPrompts.get(id) || [];
+    submitted.push({ text: before, historyLength });
+    submittedPrompts.set(id, submitted);
+    if (selectedConversation === id && prompt.value === before) { prompt.value = ''; historyNavigation = undefined; }
     drafts.delete(id); following = true;
   }
 }
@@ -213,9 +224,46 @@ $('latest').onclick = () => { following = true; transcript.scrollTop = transcrip
 transcript.onscroll = () => { following = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 60; $('latest').hidden = following; };
 new ResizeObserver(() => { if (following) transcript.scrollTop = transcript.scrollHeight; }).observe(transcript);
 document.querySelectorAll('[data-close]').forEach(button => { button.onclick = () => $(button.dataset.close).close(); });
-document.querySelectorAll('[data-suggestion]').forEach(button => { button.onclick = () => { prompt.value = button.dataset.suggestion; prompt.focus(); }; });
+document.querySelectorAll('[data-suggestion]').forEach(button => { button.onclick = () => { historyNavigation = undefined; prompt.value = button.dataset.suggestion; prompt.focus(); }; });
+function navigateHistory(direction) {
+  if (!historyNavigation) {
+    if (direction > 0 || !view) return false;
+    const items = transcriptOf(view).filter(item => item.type === 'user').map(item => item.text);
+    // Include accepted prompts that Pi has not yet consumed from its input queue.
+    let matched = -1;
+    const waiting = [];
+    for (const submitted of submittedPrompts.get(selectedConversation) || []) {
+      const index = items.findIndex((text, index) => index >= submitted.historyLength && index > matched && text === submitted.text.trim());
+      if (index >= 0) matched = index;
+      else waiting.push({ ...submitted, historyLength: Math.max(submitted.historyLength, matched + 1) });
+    }
+    submittedPrompts.set(selectedConversation, waiting);
+    items.push(...waiting.map(item => item.text));
+    if (!items.length) return false;
+    historyNavigation = {
+      items, index: items.length, edits: new Map(),
+      draft: { text: prompt.value, start: prompt.selectionStart, end: prompt.selectionEnd },
+    };
+  }
+  const history = historyNavigation;
+  if (history.index < history.items.length) history.edits.set(history.index, prompt.value);
+  history.index = Math.max(0, Math.min(history.items.length, history.index + direction));
+  if (history.index === history.items.length) {
+    prompt.value = history.draft.text;
+    prompt.setSelectionRange(history.draft.start, history.draft.end);
+    historyNavigation = undefined;
+  } else {
+    prompt.value = history.edits.get(history.index) ?? history.items[history.index];
+    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+  }
+  return true;
+}
 prompt.onkeydown = event => {
   if (event.isComposing) return;
+  if (['ArrowUp', 'ArrowDown'].includes(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+    if (navigateHistory(event.key === 'ArrowUp' ? -1 : 1)) event.preventDefault();
+    return;
+  }
   if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(event.altKey ? 'followUp' : 'steer'); }
 };
 document.addEventListener('keydown', event => {

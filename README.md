@@ -68,6 +68,7 @@ Browser controls:
 | --- | --- |
 | Enter / Send | Send a prompt, or steer active work. |
 | Shift+Enter | Insert a newline. |
+| Arrow Up / Arrow Down | Browse older/newer prompts. Down past the newest prompt restores your unsent draft (or empty input), including its cursor position. Works even after you have started typing. |
 | Alt+Enter / Follow-up | Queue a prompt after the current run. |
 | Escape / Stop / `/abort` | Request cancellation through Pi. |
 | Alt+M / Model / `/model` | Select an authenticated model while idle. |
@@ -78,7 +79,11 @@ Browser controls:
 
 The browser displays the active session branch, streaming responses and reasoning, tool arguments/results, compaction summaries, model selection, token/cost estimates, and available tools. Queued work is indicated; the public extension API does not expose the full queue text. Pending messages appear in the transcript when Pi consumes them.
 
+Prompt history comes from the active session and includes prompts accepted from this tab that are still queued. While browsing, edits to recalled prompts are kept for that navigation pass; returning to your draft restores the original unsent text. History is held steady during navigation so streaming updates do not move your position. Modified arrow keys retain their normal text-editing behavior.
+
 Light and dark appearance follow the OS/browser preference, including live changes. The page fits normal window sizes; the transcript scrolls within its panel. At widths of 440px or less, or heights of 560px or less, vertical page scrolling is enabled.
+
+The footer shows an animated gradient through “Thinking…” while Pi is working, and “Compacting…” during compaction. It returns to “Ready” when idle. Reduced-motion settings disable the animation while retaining the activity label.
 
 ## Authentication and terminal interactions
 
