@@ -17,7 +17,7 @@ This starts the Pi terminal with the extension and opens your default browser. I
 Equivalent command:
 
 ```sh
-pi --extension ./pi-web-ui/src/extension.js --web-ui
+pi --extension ./pi-web-ui/src/index.ts --web-ui
 ```
 
 The server chooses a free loopback port. Optional arguments are forwarded to Pi:
@@ -76,6 +76,8 @@ Browser controls:
 | Compact / `/compact [instructions]` | Compact context when idle. |
 | Alt+O | Expand or collapse tool and reasoning details. |
 | `/help` | Show browser shortcuts. |
+| Sessions | Open a searchable list of saved sessions for the current working directory. |
+| New session (inside Sessions) | Start a fresh Pi session and switch both the terminal and browser to it. |
 
 The browser displays the active session branch, streaming responses and reasoning, tool arguments/results, compaction summaries, model selection, token/cost estimates, and available tools. Queued work is indicated; the public extension API does not expose the full queue text. Pending messages appear in the transcript when Pi consumes them.
 
@@ -89,7 +91,9 @@ The footer shows an animated gradient through “Thinking…” while Pi is work
 
 Run `/login` **in the Pi terminal** to authenticate your provider, then open the browser model picker. It refreshes the available models from Pi. Provider credentials remain managed by Pi; the extension does not implement a second login flow or send credentials to browser JavaScript.
 
-Use the terminal for `/resume`, `/new`, `/tree`, `/reload`, custom extension commands, permission dialogs, and other terminal UI interactions. The browser provides its own small command set. Unknown slash commands receive guidance and are never forwarded as model prompts, including through the follow-up button.
+Use **Sessions** in the top bar to switch sessions or create one. These actions are available while Pi is idle with no queued messages or compaction. The picker shows session names (or the first prompt), message counts, and modification times. It respects the current session directory, and only lists sessions for the current working directory. Pi's session-change hooks can cancel an operation. A blank session may not appear in the saved list until Pi persists it after a conversation.
+
+Use the terminal for `/tree`, `/reload`, custom extension commands, permission dialogs, and other terminal UI interactions. Terminal `/resume` and `/new` remain available too. The browser provides its own small command set; use the session buttons instead of typing those slash commands in the browser. Unknown slash commands receive guidance and are never forwarded as model prompts, including through the follow-up button.
 
 The extension does not replicate arbitrary terminal widgets, browser file uploads, or durable task/subagent navigation. It shows the active Pi session. This is a browser frontend for an ordinary Pi session, with the terminal available for the remaining workflows.
 
@@ -99,7 +103,9 @@ Closing a tab leaves Pi running. Multiple tabs share the same session; each keep
 
 Pi controls history persistence. A normal saved session can be resumed with `pi --continue`; in-memory sessions follow Pi's own semantics. Interrupted model calls and tools do not gain durable recovery from this extension.
 
-Session replacement, reload, and shutdown close the old server and connections. With `--web-ui`, a subsequent interactive session start opens a new server automatically. Otherwise run `/web` again. Old tabs need the new launch URL, which has a fresh token. `/web stop` leaves the terminal session active.
+Browser-initiated session changes hand the existing HTTP server to the replacement extension runtime. The URL, access token, and browser connections stay valid; all connected tabs follow the new active session. Each tab keeps a separate unsent draft for each visited session in memory.
+
+Terminal-initiated session replacement, reload, and shutdown close the old server and connections. With `--web-ui`, a subsequent interactive session start opens a new server automatically. Otherwise run `/web` again. Old tabs then need the new launch URL, which has a fresh token. `/web stop` leaves the terminal session active.
 
 ## Local transport
 
@@ -111,7 +117,9 @@ Commands have identifiers for bounded replay protection within the server proces
 
 | File | Responsibility |
 | --- | --- |
+| [src/index.ts](src/index.ts) | Package entry point; supplies Pi's public session discovery API to the extension. |
 | [src/extension.js](src/extension.js) | Registers `/web`, CLI flags, Pi event listeners, browser launch, and cleanup. No server starts during extension registration. |
+| [src/transport.mjs](src/transport.mjs) | Keeps the server alive during browser session changes and transfers ownership to the new extension runtime through a temporary handoff. |
 | [src/bridge.mjs](src/bridge.mjs) | Maps public Pi session APIs/events into browser snapshots and validates browser actions. Handles the gap between `message_end` and session persistence. |
 | [src/server.mjs](src/server.mjs) | Serves fixed static assets, authenticated commands, current state, and SSE updates. |
 | [public/app.js](public/app.js) | Browser rendering, dialogs, keyboard controls, safe text/Markdown rendering, and reconnects. |

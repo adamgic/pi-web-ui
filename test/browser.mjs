@@ -13,7 +13,19 @@ const profile = `${root}temp/pi-extension-chrome-${Date.now()}`;
 await mkdir(out, { recursive: true });
 await mkdir(profile, { recursive: true });
 const f = fixture();
-const bridge = createBridge(f.pi);
+const saved = new Map();
+const bridge = createBridge(f.pi, {
+  listSessions: async () => [...saved].map(([id, entries]) => ({
+    id, path: `/example/${id}.jsonl`, name: id, messageCount: entries.length, modified: new Date(),
+  })),
+  changeSession: async command => {
+    saved.set(f.state.id, structuredClone(f.state.entries));
+    f.state.id = command.action === 'new-session' ? 'new-browser-session' : command.path.split('/').at(-1).replace('.jsonl', '');
+    f.state.entries = structuredClone(saved.get(f.state.id) || []);
+    bridge.update({ type: 'session_start' }, f.ctx);
+    return { accepted: true };
+  },
+});
 bridge.update({ type: 'session_start' }, f.ctx);
 f.pi.sendUserMessage = (text, options) => {
   f.state.calls.push(['submit', text, options.deliverAs]);
@@ -213,6 +225,20 @@ try {
   await arrow('ArrowUp'); assert.equal(await input(), '<img src=x onerror=alert(1)> test');
   await arrow('ArrowDown'); assert.equal(await input(), 'next');
   await arrow('ArrowDown'); assert.equal(await input(), '');
+  await evaluate("document.getElementById('prompt').value = 'Original session draft'; document.getElementById('sessions').click()");
+  await until(() => evaluate("document.getElementById('session-dialog').open"), 'session picker');
+  await evaluate("document.getElementById('new-session').click()");
+  await until(() => evaluate("document.getElementById('session-id').textContent.includes('new-browser-session')"), 'new session');
+  assert.equal(await input(), '');
+  assert.equal(await evaluate("document.querySelectorAll('#transcript .message').length"), 0);
+  await until(() => evaluate("!document.getElementById('session-dialog').open"), 'session picker closes after creating');
+  await evaluate("document.getElementById('prompt').value = 'New session draft'; document.getElementById('sessions').click()");
+  await until(() => evaluate("document.querySelector('#session-list button') !== null && document.getElementById('session-dialog').open"), 'saved session list');
+  await evaluate("document.querySelector('#session-list button').click()");
+  await until(() => evaluate("document.getElementById('session-id').textContent === 'SESSION test-session'"), 'switch back');
+  assert.equal(await input(), 'Original session draft');
+  assert.equal(await evaluate("document.querySelectorAll('#transcript .message.user').length"), 2);
+  results.push({ test: 'New session, saved session picker, unchanged connection, restored history and per-session drafts', status: 'pass' });
   await evaluate("document.getElementById('prompt').value = '/login'; document.getElementById('send').click()");
   await until(() => evaluate("document.getElementById('alerts').textContent.includes('terminal')"), 'terminal-only command guidance');
   assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2);

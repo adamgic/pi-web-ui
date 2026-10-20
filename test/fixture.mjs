@@ -6,7 +6,7 @@ export function fixture() {
     model: { provider: 'test', id: 'faux', name: 'Faux model', contextWindow: 32000 } };
   const ctx = {
     mode: 'tui', cwd: '/example/project', get model() { return state.model; },
-    sessionManager: { getSessionId: () => state.id, getSessionFile: () => '/example/session.jsonl', getBranch: () => state.entries },
+    sessionManager: { getSessionId: () => state.id, getSessionFile: () => '/example/session.jsonl', getSessionDir: () => '/example', getBranch: () => state.entries },
     modelRegistry: { getAvailable: () => [state.model] },
     isIdle: () => state.idle, hasPendingMessages: () => state.pending, getContextUsage: () => ({ tokens: 100, contextWindow: 32000 }),
     abort: () => state.calls.push(['abort']),

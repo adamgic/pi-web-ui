@@ -9,6 +9,7 @@ let localError = '', selectedConversation, submitting = false;
 const drafts = new Map();
 const submittedPrompts = new Map();
 let historyNavigation;
+let sessions = [];
 const opened = new Map();
 const transcript = $('transcript');
 const welcome = transcript.firstElementChild;
@@ -104,21 +105,28 @@ function renderNavigation() {
 }
 function controls() {
   document.querySelectorAll('[data-control]').forEach(button => { button.disabled = !online || pending; });
-  prompt.disabled = !online;
+  prompt.disabled = !online || Boolean(view?.switching);
   if (view) {
     $('abort').disabled = !online || !(view.busy || view.compacting);
     $('send').textContent = view.busy ? 'Steer ↑' : 'Send ↑';
     $('compact').disabled = !online || pending || view.busy || view.compacting || view.pendingMessages;
     $('model').disabled = !online || pending || view.busy || view.compacting;
+    const changingDisabled = !online || pending || view.busy || view.compacting || view.pendingMessages || view.switching;
+    $('sessions').disabled = changingDisabled;
+    $('new-session').disabled = changingDisabled;
+    document.querySelectorAll('#session-list button').forEach(button => { button.disabled = changingDisabled || button.dataset.current === 'true'; });
+    if (view.switching) document.querySelectorAll('[data-control]').forEach(button => { button.disabled = true; });
   }
   const working = online && Boolean(submitting || view?.busy || view?.compacting);
-  const label = !online ? 'Disconnected' : view?.compacting ? 'Compacting…' : working ? 'Thinking…' : 'Ready';
+  const label = !online ? 'Disconnected' : view?.switching ? 'Switching session…' : view?.compacting ? 'Compacting…' : working ? 'Thinking…' : 'Ready';
   if ($('status').textContent !== label) $('status').textContent = label;
   $('status').classList.toggle('working', working);
 }
 function alerts() {
   $('alerts').replaceChildren();
   for (const notice of [...(view?.notices || []).slice(-3), ...(localError ? [{ message: localError, level: 'error' }] : [])]) $('alerts').append(el('p', notice.message, notice.level));
+  $('session-error').textContent = localError;
+  $('session-error').hidden = !localError;
 }
 function render() {
   const id = view.session.id;
@@ -171,6 +179,35 @@ async function showModels() {
     $('model-search').value = ''; filterModels(); $('model-dialog').showModal(); $('model-search').focus();
   } catch (error) { localError = error.message; alerts(); }
 }
+async function showSessions() {
+  try {
+    localError = ''; alerts();
+    const response = await fetch('/api/sessions', { headers: { Authorization: `Bearer ${token}` } });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Unable to load sessions.');
+    if (result.sessionId !== selectedConversation) throw new Error('Session changed. Open the picker again.');
+    sessions = result.sessions;
+    $('session-search').value = '';
+    filterSessions();
+    $('session-dialog').showModal();
+    $('session-search').focus();
+  } catch (error) { localError = error.message; alerts(); }
+}
+function filterSessions() {
+  const query = $('session-search').value.toLowerCase();
+  const list = $('session-list');
+  list.replaceChildren();
+  for (const session of sessions.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query))) {
+    const current = session.id === selectedConversation;
+    const button = el('button', session.name, current ? 'selected' : '');
+    button.dataset.current = String(current);
+    button.append(el('small', `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}`));
+    button.onclick = async () => { if (await run('switch-session', { path: session.path })) $('session-dialog').close(); };
+    list.append(button);
+  }
+  if (!list.children.length) list.append(el('p', 'No saved sessions match. New sessions appear here after Pi saves them.', 'muted'));
+  controls();
+}
 function filterModels() {
   $('models').replaceChildren();
   const query = $('model-search').value.toLowerCase();
@@ -210,6 +247,9 @@ $('composer').onsubmit = event => { event.preventDefault(); void submit(); };
 $('follow-up').onclick = () => submit('followUp');
 $('abort').onclick = () => run('abort');
 $('model').onclick = showModels;
+$('sessions').onclick = showSessions;
+$('session-search').oninput = filterSessions;
+$('new-session').onclick = async () => { if (await run('new-session')) $('session-dialog').close(); };
 $('thinking').onclick = () => run('thinking');
 $('compact').onclick = () => $('compact-dialog').showModal();
 $('compact-form').onsubmit = async event => { event.preventDefault(); if (await run('compact', { instructions: $('compact-instructions').value })) $('compact-dialog').close(); };

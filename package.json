@@ -6,7 +6,8 @@
   "license": "MIT",
   "keywords": ["pi-package", "pi", "web-ui"],
   "files": ["src", "public", "start.mjs", "start.sh", "README.md", "LICENSE"],
-  "pi": { "extensions": ["./src/extension.js"] },
+  "pi": { "extensions": ["./src/index.ts"] },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
   "scripts": {
     "start": "node start.mjs",
     "check": "node scripts/check.mjs",
