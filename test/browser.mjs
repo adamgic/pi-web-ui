@@ -89,6 +89,24 @@ try {
   await arrow('ArrowUp'); assert.equal(await input(), '<img src=x onerror=alert(1)> test');
   await arrow('ArrowDown'); assert.equal(await input(), 'Draft line one\nDraft line two');
   assert.equal(await evaluate("document.getElementById('prompt').selectionStart"), 5);
+  await evaluate("document.getElementById('prompt').setSelectionRange(20, 20)");
+  await arrow('ArrowUp'); assert.equal(await input(), 'Draft line one\nDraft line two');
+  const firstLineCaret = await evaluate("document.getElementById('prompt').selectionStart");
+  assert.ok(firstLineCaret < 'Draft line one\n'.length, 'Up moves the caret to the first line before recalling history');
+  await arrow('ArrowUp'); assert.equal(await input(), '<img src=x onerror=alert(1)> test');
+  await evaluate("document.getElementById('prompt').value = 'Recalled first line\\nRecalled last line'; document.getElementById('prompt').setSelectionRange(4, 4)");
+  for (let i = 0; i < 3; i++) {
+    await arrow('ArrowUp');
+    assert.equal(await input(), 'Recalled first line\nRecalled last line');
+    assert.equal(await evaluate("document.getElementById('prompt').selectionStart"), 4, 'Up at the oldest entry must not move the caret');
+    assert.equal(await evaluate("document.getElementById('prompt').selectionEnd"), 4);
+  }
+  await arrow('ArrowDown'); assert.equal(await input(), 'Recalled first line\nRecalled last line');
+  assert.ok(await evaluate("document.getElementById('prompt').selectionStart") >= 'Recalled first line\n'.length);
+  await arrow('ArrowDown'); assert.equal(await input(), 'Draft line one\nDraft line two');
+  assert.equal(await evaluate("document.getElementById('prompt').selectionStart"), firstLineCaret);
+  await evaluate("document.getElementById('prompt').setSelectionRange(0, 5)");
+  await arrow('ArrowUp'); assert.equal(await input(), 'Draft line one\nDraft line two');
   await evaluate("document.getElementById('prompt').value = ''");
   await evaluate("document.getElementById('thinking').click()");
   await until(() => evaluate("document.getElementById('thinking').textContent.includes('minimal')"), 'thinking');
@@ -104,9 +122,15 @@ try {
   await arrow('ArrowUp'); assert.equal(await input(), '<img src=x onerror=alert(1)> test');
   await arrow('ArrowUp'); assert.equal(await input(), '<img src=x onerror=alert(1)> test');
   await arrow('ArrowDown'); assert.equal(await input(), 'next');
-  await evaluate("document.getElementById('prompt').value = 'Edited recalled prompt'");
+  await evaluate("document.getElementById('prompt').value = 'Edited first line\\nEdited middle line\\nEdited last line'; document.getElementById('prompt').setSelectionRange(0, 0)");
   await arrow('ArrowUp');
-  await arrow('ArrowDown'); assert.equal(await input(), 'Edited recalled prompt');
+  await arrow('ArrowDown'); assert.equal(await input(), 'Edited first line\nEdited middle line\nEdited last line');
+  assert.equal(await evaluate("document.getElementById('prompt').selectionStart"), 0, 'Down enters newer history at the first line');
+  await arrow('ArrowDown'); assert.equal(await input(), 'Edited first line\nEdited middle line\nEdited last line');
+  const middleCaret = await evaluate("document.getElementById('prompt').selectionStart");
+  assert.ok(middleCaret >= 'Edited first line\n'.length && middleCaret < 'Edited first line\nEdited middle line\n'.length);
+  await arrow('ArrowDown'); assert.equal(await input(), 'Edited first line\nEdited middle line\nEdited last line');
+  assert.ok(await evaluate("document.getElementById('prompt').selectionStart") >= 'Edited first line\nEdited middle line\n'.length);
   await arrow('ArrowDown'); assert.equal(await input(), 'Unsent draft');
   await arrow('ArrowDown'); assert.equal(await input(), 'Unsent draft');
   await evaluate("document.getElementById('prompt').value += ' continued'");
@@ -179,6 +203,9 @@ try {
   results.push({ test: 'browser controls, safe rendering, streaming, reload without replay', status: 'pass' });
   results.push({ test: 'Arrow Up recall, draft preservation, recall after reload, thinking animation, idle reset and reduced motion', status: 'pass' });
   results.push({ test: 'Bidirectional multi-prompt history, oldest/newest boundaries, multiline draft and caret restoration, recalled edits and empty draft', status: 'pass' });
+  results.push({ test: 'Multiline caret movement precedes history navigation in both directions; selections keep native behavior', status: 'pass' });
+  results.push({ test: 'Repeated Up on the first line of the oldest history entry preserves text and caret', status: 'pass' });
+  results.push({ test: 'Down enters newer multiline history on its first line and traverses each line before restoring the draft', status: 'pass' });
   await writeFile(`${out}/browser-results.json`, JSON.stringify(results, null, 2));
   console.log(JSON.stringify(results, null, 2));
 } finally {

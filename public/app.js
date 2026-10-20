@@ -246,6 +246,8 @@ function navigateHistory(direction) {
     };
   }
   const history = historyNavigation;
+  // Consume the key without rewriting the textarea or moving its caret.
+  if (direction < 0 && history.index === 0) return true;
   if (history.index < history.items.length) history.edits.set(history.index, prompt.value);
   history.index = Math.max(0, Math.min(history.items.length, history.index + direction));
   if (history.index === history.items.length) {
@@ -254,13 +256,21 @@ function navigateHistory(direction) {
     historyNavigation = undefined;
   } else {
     prompt.value = history.edits.get(history.index) ?? history.items[history.index];
-    prompt.setSelectionRange(prompt.value.length, prompt.value.length);
+    const caret = direction > 0 ? 0 : prompt.value.length;
+    prompt.setSelectionRange(caret, caret);
   }
   return true;
 }
 prompt.onkeydown = event => {
   if (event.isComposing) return;
   if (['ArrowUp', 'ArrowDown'].includes(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+    // Let the textarea handle movement within the text and collapse selections.
+    if (prompt.selectionStart !== prompt.selectionEnd) return;
+    const caret = prompt.selectionStart;
+    const atBoundary = event.key === 'ArrowUp'
+      ? !prompt.value.slice(0, caret).includes('\n')
+      : !prompt.value.slice(caret).includes('\n');
+    if (!atBoundary) return;
     if (navigateHistory(event.key === 'ArrowUp' ? -1 : 1)) event.preventDefault();
     return;
   }

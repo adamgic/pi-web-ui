@@ -68,7 +68,7 @@ Browser controls:
 | --- | --- |
 | Enter / Send | Send a prompt, or steer active work. |
 | Shift+Enter | Insert a newline. |
-| Arrow Up / Arrow Down | Browse older/newer prompts. Down past the newest prompt restores your unsent draft (or empty input), including its cursor position. Works even after you have started typing. |
+| Arrow Up / Arrow Down | Move within multiline input first. Up on the first line browses older prompts; Down on the last line browses newer prompts, then restores your unsent draft (or empty input), including its cursor position. |
 | Alt+Enter / Follow-up | Queue a prompt after the current run. |
 | Escape / Stop / `/abort` | Request cancellation through Pi. |
 | Alt+M / Model / `/model` | Select an authenticated model while idle. |
