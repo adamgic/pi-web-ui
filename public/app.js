@@ -248,6 +248,7 @@ function navigateHistory(direction) {
   const history = historyNavigation;
   // Consume the key without rewriting the textarea or moving its caret.
   if (direction < 0 && history.index === 0) return true;
+  const column = prompt.selectionStart - (prompt.value.slice(0, prompt.selectionStart).lastIndexOf('\n') + 1);
   if (history.index < history.items.length) history.edits.set(history.index, prompt.value);
   history.index = Math.max(0, Math.min(history.items.length, history.index + direction));
   if (history.index === history.items.length) {
@@ -256,7 +257,10 @@ function navigateHistory(direction) {
     historyNavigation = undefined;
   } else {
     prompt.value = history.edits.get(history.index) ?? history.items[history.index];
-    const caret = direction > 0 ? 0 : prompt.value.length;
+    const lineStart = direction > 0 ? 0 : prompt.value.lastIndexOf('\n') + 1;
+    const newline = prompt.value.indexOf('\n', lineStart);
+    const lineEnd = newline < 0 ? prompt.value.length : newline;
+    const caret = lineStart + Math.min(column, lineEnd - lineStart);
     prompt.setSelectionRange(caret, caret);
   }
   return true;
