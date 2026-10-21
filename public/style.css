@@ -108,7 +108,6 @@
 #session-id{width:100%;text-align:left;padding:6px 0;cursor:copy}
 .detail-tooltip{display:none;position:absolute;z-index:2;top:100%;left:0;right:0;padding:10px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;box-shadow:0 4px 15px var(--dialog-shadow);font:12px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;user-select:all}
 .detail-copy-wrap:hover .detail-tooltip,.detail-copy-wrap:focus-within .detail-tooltip{display:block}
-#copy-status{font-size:11px}
 .metadata{margin:12px 0 0;font-size:12px;line-height:1.5;display:grid;grid-template-columns:minmax(0,1fr);gap:3px}
 .metadata dt{color:var(--muted);font-size:11px;margin-top:6px}
 .metadata dd{margin:0;overflow-wrap:anywhere}
@@ -139,7 +138,18 @@
 #session-details-panel>summary{display:list-item;padding:7px 0;font-size:12px;color:var(--text);list-style-type:disclosure-closed}
 #session-details-panel[open]>summary{list-style-type:disclosure-open}
 #session-details-panel .metadata{margin-top:3px;margin-bottom:14px}
-.detail-copy{display:block;width:100%;text-align:left;padding:5px 0;cursor:copy;white-space:normal;overflow-wrap:anywhere;font-size:12px}
+.detail-copy{color:var(--text);display:block;width:100%;text-align:left;padding:5px 0;cursor:copy;white-space:normal;overflow-wrap:anywhere;font-size:12px}
 .model-label{margin-top:14px}
 #session-model{display:block;margin-top:7px;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
-#copy-status{display:block;margin-top:7px}
+
+/* Fixed notifications do not move the page or intercept clicks. */
+.toasts{position:fixed;top:16px;left:16px;z-index:1000;width:min(340px,calc(100vw - 32px));pointer-events:none}
+.toast{display:grid;grid-template-rows:1fr;padding-bottom:8px;opacity:1;transform:translateY(0);transition:opacity 150ms ease,transform 180ms ease,grid-template-rows 180ms ease,padding-bottom 180ms ease}
+.toast-content{min-height:0;overflow:hidden}
+.toast-message{padding:12px 16px;border:2px solid #e48b19;border-radius:12px;background:#fff3a6;color:#533400;box-shadow:0 3px 10px #53340018;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.toast.entering{opacity:0;transform:translateY(-8px)}
+.toast.leaving{opacity:0;transform:translateY(-8px);grid-template-rows:0fr;padding-bottom:0}
+@media(prefers-reduced-motion:reduce){.toast{transition:none;transform:none}}
+
+.session-copy{display:block;width:100%;padding:0;margin:10px 0;text-align:left;color:var(--text);font-size:13px;font-weight:600;line-height:1.5;white-space:normal;overflow-wrap:anywhere;cursor:copy}
+#session-details-panel{margin-top:14px}

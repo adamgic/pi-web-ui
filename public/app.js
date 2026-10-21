@@ -22,6 +22,23 @@ function el(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
+async function copyValue(label, value) {
+  try { await navigator.clipboard.writeText(String(value)); showToast(`${label} copied`); }
+  catch { showToast('Copy unavailable. Select the value to copy manually.'); }
+}
+// Oldest notices stay at the top; each expires three seconds after appearing.
+function showToast(message) {
+  const toast = el('div', undefined, 'toast entering');
+  const content = el('div', undefined, 'toast-content');
+  content.append(el('div', message, 'toast-message'));
+  toast.append(content);
+  $('toasts').append(toast);
+  requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.remove('entering')));
+  setTimeout(() => {
+    toast.classList.add('leaving');
+    setTimeout(() => toast.remove(), 180);
+  }, 3000);
+}
 // Markdown is rendered using DOM text nodes only; model/tool HTML is never executed.
 function inline(parent, text) {
   const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
@@ -132,12 +149,12 @@ function render() {
     if (selectedConversation !== undefined) drafts.set(selectedConversation, historyNavigation?.draft.text ?? prompt.value);
     historyNavigation = undefined;
     prompt.value = drafts.get(id) || '';
-    sessions = []; filterSessions(); $('copy-status').textContent = '';
+    sessions = []; filterSessions();
     selectedConversation = id; following = true; opened.clear();
   }
 
   $('cwd').textContent = view.session.displayCwd || view.session.cwd;
-  $('cwd').title = view.session.cwd;
+  $('cwd').title = `Copy working directory: ${view.session.cwd}`;
   $('session-model').textContent = view.model?.modelId || 'None selected';
   $('session-name').textContent = view.session.name;
   const messages = transcriptOf(view).filter(item => ['user', 'assistant'].includes(item.type));
@@ -146,8 +163,7 @@ function render() {
     ['Created', view.session.created ? new Date(view.session.created).toLocaleString() : 'Unknown'],
     ['Branch messages', messages.length],
     ['Provider', view.model?.provider || 'None selected'],
-    ['Model', view.model?.modelId || 'None selected'],
-    ['Session file', view.session.file || 'In memory'],
+        ['Session file', view.session.file || 'In memory'],
   ], true);
   $('conversation-title').textContent = view.session.name;
   $('model').textContent = view.model?.modelId || 'Select model';
@@ -199,7 +215,7 @@ function renderMetadata(node, rows, copyable = false) {
     const definition = el('dd');
     if (!copyable) definition.textContent = value;
     else {
-      const button = el('button', label === 'Session ID' ? `SESSION ${value}` : value, 'quiet detail-copy');
+      const button = el('button', value, 'quiet detail-copy');
       const tooltip = el('span', value, 'detail-tooltip');
       tooltip.id = label === 'Session ID' ? 'session-id-tooltip' : `session-detail-tooltip-${index}`;
       tooltip.setAttribute('role', 'tooltip');
@@ -207,10 +223,7 @@ function renderMetadata(node, rows, copyable = false) {
       button.setAttribute('aria-describedby', tooltip.id);
       button.title = `Copy ${label}`;
       if (label === 'Session ID') { button.id = 'session-id'; button.classList.add('mono'); }
-      button.onclick = async () => {
-        try { await navigator.clipboard.writeText(String(value)); $('copy-status').textContent = `${label} copied`; }
-        catch { $('copy-status').textContent = 'Copy unavailable. Select the value shown on hover to copy.'; }
-      };
+      button.onclick = () => copyValue(label, value);
       definition.className = 'detail-copy-wrap';
       definition.append(button, tooltip);
     }
@@ -292,6 +305,8 @@ async function submit(mode = 'steer') {
     drafts.delete(id); following = true;
   }
 }
+$('cwd').onclick = () => { if (view) void copyValue('Working directory', view.session.cwd); };
+$('session-name').onclick = () => { if (view) void copyValue('Session name', view.session.name); };
 $('composer').onsubmit = event => { event.preventDefault(); void submit(); };
 $('follow-up').onclick = () => submit('followUp');
 $('abort').onclick = () => run('abort');

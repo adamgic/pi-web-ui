@@ -100,13 +100,29 @@ try {
   await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
   await cdp('Browser.grantPermissions', { origin: new URL(server.url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await evaluate("document.getElementById('session-id').click()");
-  await until(() => evaluate("document.getElementById('copy-status').textContent === 'Session ID copied'"), 'copy session ID');
+  await until(() => evaluate("document.querySelector('#toasts .toast-message')?.textContent === 'Session ID copied'"), 'copy session ID');
   assert.equal(await evaluate('navigator.clipboard.readText()'), f.state.id);
+  await pause(600);
   const detailValues = await evaluate("[...document.querySelectorAll('#session-details .detail-copy')].map(b => ({label:b.getAttribute('aria-label'), value:b.nextElementSibling.textContent}))");
   for (let index = 0; index < detailValues.length; index++) {
     await evaluate(`document.querySelectorAll('#session-details .detail-copy')[${index}].click()`);
     await until(async () => (await evaluate('navigator.clipboard.readText()')) === detailValues[index].value, detailValues[index].label);
   }
+  assert.equal(await evaluate("document.querySelectorAll('#toasts .toast').length"), detailValues.length + 1);
+  const firstRemainingTop = await evaluate("document.querySelectorAll('#toasts .toast')[1].getBoundingClientRect().top");
+  await until(() => evaluate("document.querySelector('#toasts .toast')?.classList.contains('leaving')"), 'oldest toast expires first');
+  await pause(220);
+  assert.ok(await evaluate("document.querySelector('#toasts .toast').getBoundingClientRect().top") < firstRemainingTop);
+  await until(() => evaluate("document.querySelectorAll('#toasts .toast').length === 0"), 'copy notifications expire');
+  results.push({ test: 'Copy toasts stack, expire oldest first after three seconds, and move remaining messages upward', status: 'pass' });
+  assert.ok(await evaluate("document.getElementById('session-model').getBoundingClientRect().top < document.getElementById('session-details-panel').getBoundingClientRect().top"));
+  assert.equal(await evaluate("[...document.querySelectorAll('#session-details dt')].some(n => n.textContent === 'Model')"), false);
+  assert.equal(await evaluate("document.getElementById('session-id').textContent"), f.state.id);
+  for (const [id, value] of [['cwd', f.ctx.cwd], ['session-name', f.pi.getSessionName()]]) {
+    await evaluate(`document.getElementById('${id}').click()`);
+    await until(async () => (await evaluate('navigator.clipboard.readText()')) === value, `copy ${id}`);
+  }
+
   await evaluate("document.querySelector('#session-details-panel summary').click()");
   assert.equal(await evaluate("document.getElementById('session-details-panel').open"), false);
   assert.ok(await evaluate("document.getElementById('session-model').checkVisibility()"));
@@ -262,7 +278,7 @@ try {
   await evaluate("document.getElementById('prompt').value = 'New session draft'; document.getElementById('sessions').click()");
   await until(() => evaluate("document.querySelector('#session-list button') !== null && document.getElementById('session-dialog').open"), 'saved session list');
   await evaluate("document.querySelector('#session-list button').click()");
-  await until(() => evaluate("document.getElementById('session-id').textContent === 'SESSION test-session'"), 'switch back');
+  await until(() => evaluate("document.getElementById('session-id').textContent === 'test-session'"), 'switch back');
   assert.equal(await input(), 'Original session draft');
   assert.equal(await evaluate("document.querySelectorAll('#transcript .message.user').length"), 2);
   results.push({ test: 'New session, saved session picker, unchanged connection, restored history and per-session drafts', status: 'pass' });

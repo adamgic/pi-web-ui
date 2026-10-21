@@ -2,11 +2,12 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Pi · Web UI</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
 <body>
+<div id="toasts" class="toasts" role="status" aria-live="polite" aria-relevant="additions" aria-label="Notifications"></div>
 <div class="app">
   <header class="topbar"><div class="brand"><span class="mark">π</span><div><strong>Pi workspace</strong><span class="eyebrow">PI SESSION</span></div></div><div class="connection"><span id="connection-dot" class="dot"></span><span id="connection">Connecting…</span></div><button id="sessions" class="quiet" data-control>Sessions</button><button id="help" class="quiet" title="Keyboard shortcuts">? <span>Help</span></button></header>
   <div class="workspace">
     <aside class="sidebar" aria-label="Session information">
-      <section class="session-meta"><span class="eyebrow">WORKING DIRECTORY</span><strong id="cwd">Connecting to Pi…</strong><span class="eyebrow">SESSION</span><strong id="session-name">New session</strong><details id="session-details-panel"><summary>Session details</summary><dl id="session-details" class="metadata"></dl></details><span class="eyebrow model-label">MODEL</span><span id="session-model">None selected</span><span id="copy-status" class="muted" role="status"></span></section>
+      <section class="session-meta"><span class="eyebrow">WORKING DIRECTORY</span><button id="cwd" class="quiet session-copy" aria-label="Copy working directory">Connecting to Pi…</button><span class="eyebrow">SESSION</span><button id="session-name" class="quiet session-copy" aria-label="Copy session name" title="Copy session name">New session</button><span class="eyebrow model-label">MODEL</span><span id="session-model">None selected</span><details id="session-details-panel"><summary>Session details</summary><dl id="session-details" class="metadata"></dl></details></section>
       <section class="usage-section"><h2>Model usage</h2><dl id="usage" class="metadata"></dl><p class="muted usage-note">Current branch totals. Cost is reported or estimated, not an invoice.</p></section>
       <section class="task-section"><div class="section-title"><h2>Available tools</h2></div><div id="tasks" class="task-list"><p class="muted">Loading session tools.</p></div></section>
       <div class="sidebar-foot"><span class="dot saved"></span> Shared with the Pi terminal</div>
