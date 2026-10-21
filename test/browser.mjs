@@ -375,6 +375,34 @@ try {
   })()`);
   assert.deepEqual(safeCode, [{ text: '<script>alert(1)</script>', scripts: 0 }, { text: '<script>alert(1)</script>', scripts: 0 }]);
   results.push({ test: 'Python/JSON depth colors, standard Highlight.js, persistent toggle, exact source, light/dark palettes and safe markup', status: 'pass' });
+  // Produce a real PNG and WebM with browser-native encoders for decoding checks.
+  const mediaData = await evaluate(`(async () => {
+    const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90;
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#80baff'; ctx.fillRect(0, 0, 160, 90);
+    const png = canvas.toDataURL('image/png').split(',')[1];
+    const stream = canvas.captureStream(10);
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+    const chunks = []; recorder.ondataavailable = event => chunks.push(event.data);
+    const stopped = new Promise(resolve => recorder.onstop = resolve);
+    recorder.start(); await new Promise(resolve => setTimeout(resolve, 300)); recorder.stop(); await stopped;
+    stream.getTracks().forEach(track => track.stop());
+    const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
+    return { png, video: btoa(String.fromCharCode(...bytes)) };
+  })()`);
+  await writeFile(`${out}/native-image.png`, Buffer.from(mediaData.png, 'base64'));
+  await writeFile(`${out}/native-video.webm`, Buffer.from(mediaData.video, 'base64'));
+  for (const [name, selector] of [['native-image.png', 'img'], ['native-video.webm', 'video']]) {
+    await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${out}/${name}` })}#token=${server.token}` });
+    await until(() => evaluate(`location.pathname.startsWith('/media/') && Boolean(document.querySelector('${selector}'))`), `native ${selector} viewer`);
+    try {
+      await until(() => evaluate(selector === 'img' ? "document.querySelector('img').naturalWidth === 160" : "document.querySelector('video').readyState >= 1"), `native ${selector} decoding`);
+    } catch (error) {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate("({ html: document.body.innerHTML, error: document.querySelector('video')?.error?.message })"))}`);
+    }
+    assert.equal(await evaluate("Boolean(document.querySelector('#highlight-controls, #toggle, .file-preview'))"), false);
+    if (selector === 'video') assert.ok(await evaluate("document.querySelector('video').controls"));
+  }
+  results.push({ test: 'Native image and video documents decode correctly with no app preview controls', status: 'pass' });
   assert.deepEqual(exceptions, []);
   results.push({ test: 'browser controls, safe rendering, streaming, reload without replay', status: 'pass' });
   results.push({ test: 'Arrow Up recall, draft preservation, recall after reload, thinking animation, idle reset and reduced motion', status: 'pass' });

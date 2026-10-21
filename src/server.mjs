@@ -1,3 +1,4 @@
+import { mediaType, serveMedia } from './media.mjs';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { realpath, stat, readFile } from 'node:fs/promises';
@@ -42,6 +43,7 @@ export async function startServer(bridge, { port = 0 } = {}) {
   const token = randomBytes(32).toString('hex');
   const clients = new Set();
   const receipts = new Map();
+  const media = new Map();
   let origin;
   let timer;
   let queue = Promise.resolve();
@@ -88,6 +90,11 @@ export async function startServer(bridge, { port = 0 } = {}) {
       if (req.headers.host !== new URL(origin).host) throw error(403, 'Invalid host.');
       if (req.headers.origin && req.headers.origin !== origin) throw error(403, 'Cross-origin requests are not allowed.');
       const url = new URL(req.url, origin);
+      if (url.pathname.startsWith('/media/')) {
+        const entry = media.get(url.pathname);
+        if (!entry || !['GET', 'HEAD'].includes(req.method)) throw error(404, 'Media link not found. Reopen the file from the response.');
+        await serveMedia(req, res, entry); return;
+      }
       if (url.pathname.startsWith('/api/')) {
         if (!authorized(req)) throw error(401, 'Open the full launch URL printed in the terminal.');
         const localPath = value => {
@@ -131,6 +138,13 @@ export async function startServer(bridge, { port = 0 } = {}) {
             try { path = await realpath(candidate); info = await stat(path); }
             catch { throw error(404, 'File not found or unavailable.'); }
             if (!info.isFile()) throw error(400, 'This path is not a file.');
+            const type = mediaType(candidate) || mediaType(path);
+            if (type) {
+              const mediaUrl = `/media/${randomBytes(24).toString('hex')}`;
+              if (media.size >= 512) media.delete(media.keys().next().value);
+              media.set(mediaUrl, { path, type });
+              json(res, 200, { path, type, mediaUrl }); return;
+            }
             if (info.size > 2 * 1024 * 1024) throw error(413, 'Preview is limited to files up to 2 MiB.');
             try { bytes = await readFile(path); } catch { throw error(403, 'This file cannot be read.'); }
           }
@@ -198,7 +212,7 @@ export async function startServer(bridge, { port = 0 } = {}) {
       if (closePromise) return closePromise;
       closing = true; unsubscribe(); clearTimeout(timer); clearInterval(heartbeat);
       for (const res of clients) res.end();
-      clients.clear();
+      clients.clear(); media.clear();
       closePromise = new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
       return closePromise;
     },

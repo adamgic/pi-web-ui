@@ -159,7 +159,10 @@ launch token and are limited to 2 MiB. Any file readable by the Pi process can
 be previewed, including files outside the working directory and symlink targets.
 Local references (including backtick-only names) are checked while rendering;
 only existing files become links. Relative paths use the session working directory;
-absolute paths, `../`, `~/`, and `file://` links are supported. Binary files are not previewed.
+absolute paths, `../`, `~/`, and `file://` links are supported. Images and videos open in the browser’s native viewer, with no app toolbar or
+coloring options. Videos use native playback controls and support byte-range
+seeking. The 2 MiB text limit does not apply to media. Other binary formats are
+not previewed.
 External Markdown and text-file URLs are fetched on click and shown in the
 built-in preview. Ordinary web pages open directly. Remote reads time out after
 15 seconds and do not forward the launch token or browser cookies. File links refer to the machine running Pi.
