@@ -222,6 +222,12 @@ try {
   }, f.ctx);
   bridge.update({ type: 'tool_execution_update', toolCallId: 'c1', toolName: 'read', partialResult: { content: [{ type: 'text', text: 'export function main() {}' }] } }, f.ctx);
   await until(() => evaluate("document.querySelector('.tool-card') !== null"), 'streaming tool card');
+  assert.equal(await evaluate("document.getElementById('expand').textContent"), 'Expand tool details');
+  assert.ok(await evaluate("Math.abs(document.getElementById('expand').getBoundingClientRect().top + document.getElementById('expand').offsetHeight / 2 - document.getElementById('status').getBoundingClientRect().top - document.getElementById('status').offsetHeight / 2) < 2"));
+  await evaluate("document.querySelector('.copy-response').click()");
+  await until(async () => (await evaluate('navigator.clipboard.readText()')) === '## Inspecting the project\nThe browser shares this Pi session.', 'copy original response Markdown');
+  results.push({ test: 'Copy response preserves raw Markdown; tool toggle has no shortcut hint and aligns with status', status: 'pass' });
+
   await until(() => evaluate("document.getElementById('status').textContent === 'Thinking…'"), 'thinking indicator');
   assert.equal(await evaluate("getComputedStyle(document.getElementById('status')).animationName"), 'thinking-shimmer');
   assert.equal(await evaluate("getComputedStyle(document.getElementById('status')).fontSize"), readyFont);

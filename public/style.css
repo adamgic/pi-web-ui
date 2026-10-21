@@ -153,3 +153,9 @@
 
 .session-copy{display:block;width:100%;padding:0;margin:10px 0;text-align:left;color:var(--text);font-size:13px;font-weight:600;line-height:1.5;white-space:normal;overflow-wrap:anywhere;cursor:copy}
 #session-details-panel{margin-top:14px}
+
+.statusbar{align-items:center}
+#expand{margin-left:auto;font-size:11px;white-space:nowrap}
+.transcript-actions{min-height:0;justify-content:flex-end}
+.message header{align-items:center;justify-content:space-between}
+.copy-response{font-size:11px;font-weight:400;letter-spacing:normal;text-transform:none;padding:3px 6px}

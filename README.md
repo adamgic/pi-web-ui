@@ -143,3 +143,5 @@ node test/browser.mjs
 ```
 
 The browser check uses Chrome's DevTools protocol directly, without an additional testing dependency. It defaults to the macOS Google Chrome path; set `CHROME_PATH` elsewhere. It saves screenshots/results under [output](output) and retains its disposable browser profile under `temp/`.
+
+Each assistant response has a **Copy Markdown** button that copies its original text, preserving Markdown syntax for pasting into a `.md` file. During streaming it copies the text received so far. Copying shows a toast. **Expand tool details** sits to the right of the activity indicator above the prompt; Alt+O still works without an inline shortcut hint.

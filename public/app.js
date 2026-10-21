@@ -105,7 +105,14 @@ function renderTranscript() {
     } else if (item.type === 'compaction') fragment.append(detail(item.key, el('span', 'Context summary'), prose(item.text), 'thinking-card'));
     else {
       const message = el('article', undefined, `message ${item.type}`);
-      message.append(el('header', item.type === 'user' ? 'You' : item.type === 'assistant' ? `Pi${item.streaming ? ' · streaming' : ''}` : 'Context'));
+      const header = el('header', item.type === 'user' ? 'You' : item.type === 'assistant' ? `Pi${item.streaming ? ' · streaming' : ''}` : 'Context');
+      if (item.type === 'assistant' && item.text) {
+        const copy = el('button', 'Copy Markdown', 'quiet copy-response');
+        copy.setAttribute('aria-label', 'Copy response as Markdown');
+        copy.onclick = () => copyValue('Response Markdown', item.text);
+        header.append(copy);
+      }
+      message.append(header);
       if (item.thinking) message.append(detail(`${item.key}:thinking`, el('span', 'Reasoning'), prose(item.thinking), 'thinking-card'));
       if (item.text) message.append(item.type === 'user' ? el('div', item.text, 'prose') : prose(item.text));
       if (item.error) message.append(el('p', item.error, 'danger'));
