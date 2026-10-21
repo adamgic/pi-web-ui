@@ -1,9 +1,15 @@
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { realpath, stat, readFile } from 'node:fs/promises';
+
+import { resolve, relative, isAbsolute } from 'node:path';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
+  ['/preview.html', ['preview.html', 'text/html; charset=utf-8']],
+  ['/preview.js', ['preview.js', 'text/javascript; charset=utf-8']],
+  ['/preview.css', ['preview.css', 'text/css; charset=utf-8']],
+  ['/prose.js', ['prose.js', 'text/javascript; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/view.js', ['view.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
@@ -77,6 +83,23 @@ export async function startServer(bridge, { port = 0 } = {}) {
       const url = new URL(req.url, origin);
       if (url.pathname.startsWith('/api/')) {
         if (!authorized(req)) throw error(401, 'Open the full launch URL printed in the terminal.');
+        if (req.method === 'GET' && url.pathname === '/api/file') {
+          const requested = url.searchParams.get('path');
+          if (!requested || requested.includes('\0')) throw error(400, 'Invalid file path.');
+          const root = await realpath(bridge.current().session.cwd);
+          const within = path => { const rel = relative(root, path); return rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel); };
+          const candidate = resolve(url.searchParams.get('cwd') || root, requested.replace(/:\d+(?::\d+)?$/, ''));
+          if (!within(candidate)) throw error(403, 'File is outside the session working directory.');
+          let path, info;
+          try { path = await realpath(candidate); info = await stat(path); }
+          catch { throw error(404, 'File not found.'); }
+          if (!within(path)) throw error(403, 'File is outside the session working directory.');
+          if (!info.isFile()) throw error(400, 'This path is not a file.');
+          if (info.size > 2 * 1024 * 1024) throw error(413, 'Preview is limited to files up to 2 MiB.');
+          const bytes = await readFile(path);
+          if (bytes.includes(0)) throw error(415, 'Binary files cannot be displayed as text.');
+          json(res, 200, { path, content: bytes.toString('utf8') }); return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
           json(res, 200, await bridge.listSessions()); return;
         }

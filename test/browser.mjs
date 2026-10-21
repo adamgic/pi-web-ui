@@ -74,6 +74,17 @@ try {
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await cdp('Page.navigate', { url: server.url });
   await until(() => evaluate("document.getElementById('connection')?.textContent === 'Connected'"), 'UI connection');
+  const links = await evaluate(`(async () => {
+    const { prose } = await import('/prose.js');
+    const node = prose('[Notes](<docs/My Notes.md>) README.md:12 https://example.com \`src/app.js\`\\n<script>bad()</script>', { token: 'test', cwd: '/example/project' });
+    return { links: [...node.querySelectorAll('a')].map(a => ({ href: a.getAttribute('href'), target: a.target, rel: a.rel })), scripts: node.querySelectorAll('script').length };
+  })()`);
+  assert.equal(links.links.length, 4);
+  assert.equal(links.scripts, 0);
+  assert.ok(links.links.every(a => a.target === '_blank' && a.rel.includes('noopener')));
+  assert.match(links.links[0].href, /My\+Notes.md/);
+  assert.match(links.links[1].href, /README.md%3A12/);
+  results.push({ test: 'Markdown links, bare paths, inline code paths, external URLs and safe DOM rendering', status: 'pass' });
   assert.equal(await evaluate('getComputedStyle(document.documentElement).colorScheme'), 'light');
   assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(248, 250, 249)');
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/desktop-empty.png`, Buffer.from(result.data, 'base64')));

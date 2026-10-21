@@ -1,0 +1,6 @@
+body { overflow: auto; height: auto; }
+.file-preview { max-width: 960px; margin: 32px auto; padding: 24px; }
+.file-preview header { display: flex; align-items: center; gap: 24px; margin-bottom: 24px; }
+.file-preview h1 { font-size: 18px; overflow-wrap: anywhere; }
+.file-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-preview img { max-width: 100%; }

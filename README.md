@@ -145,3 +145,17 @@ node test/browser.mjs
 The browser check uses Chrome's DevTools protocol directly, without an additional testing dependency. It defaults to the macOS Google Chrome path; set `CHROME_PATH` elsewhere. It saves screenshots/results under [output](output) and retains its disposable browser profile under `temp/`.
 
 Each assistant response has an overlapping-rectangles copy icon (hover for **Copy response**) that copies its original text, preserving Markdown syntax for pasting into a `.md` file. During streaming it copies the text received so far. Copying shows a toast. **Expand tool details** sits to the right of the activity indicator above the prompt; Alt+O still works without an inline shortcut hint.
+
+Response links open in a new tab. Explicit Markdown links, bare HTTP(S) URLs,
+file paths, and filenames in inline code are clickable. Relative files resolve
+against the session working directory. Use `[label](<path with spaces.md>)` for
+paths containing spaces.
+
+Local `.md` and `.markdown` files open in the built-in Markdown preview with a
+source toggle; no browser extension is required. The lightweight renderer supports
+headings, paragraphs, lists, bold, inline code, fenced code, and links. Raw HTML
+is displayed as text. Other text files open as source. Preview reads require the
+launch token, are confined to the current session working directory (including
+symlink targets), and are limited to 2 MiB. Binary files are not previewed.
+External URLs open their original website; external Markdown rendering depends
+on that website. File links refer to the machine running Pi.
