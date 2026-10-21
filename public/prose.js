@@ -1,3 +1,5 @@
+import { equation } from './math.js';
+
 function el(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = String(text);
@@ -22,7 +24,7 @@ export function linkTarget(value, { token = '', cwd = '' } = {}) {
   return `/preview.html?${params}#token=${encodeURIComponent(token)}`;
 }
 function inline(parent, text, options) {
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\((?:<[^>]+>|[^)]+)\)|https?:\/\/[^\s<>]+|(?:\.?\.?\/)?(?:[\w@~.-]+\/)*[\w@.-]+\.[a-zA-Z][a-zA-Z0-9]{0,9}(?::\d+(?::\d+)?)?)/g;
+  const pattern = /(`[^`]+`|\\\$|\$\$[^$]+\$\$|\$(?!\s)(?:\\.|[^$\\])+?\$|\\\([\s\S]+?\\\)|\*\*[^*]+\*\*|\[[^\]]+\]\((?:<[^>]+>|[^)]+)\)|https?:\/\/[^\s<>]+|(?:\.?\.?\/)?(?:[\w@~.-]+\/)*[\w@.-]+\.[a-zA-Z][a-zA-Z0-9]{0,9}(?::\d+(?::\d+)?)?)/g;
   const appendLink = (label, target, code = false) => {
     const href = linkTarget(target, options);
     const content = code ? el('code', label) : document.createTextNode(label);
@@ -37,7 +39,11 @@ function inline(parent, text, options) {
   for (const match of text.matchAll(pattern)) {
     parent.append(document.createTextNode(text.slice(end, match.index)));
     const part = match[0];
-    if (part.startsWith('`')) {
+    if (part === '\\$') parent.append(document.createTextNode('$'));
+    else if (part.startsWith('$$')) parent.append(equation(part.slice(2, -2), true));
+    else if (part.startsWith('$')) parent.append(equation(part.slice(1, -1)));
+    else if (part.startsWith('\\(')) parent.append(equation(part.slice(2, -2)));
+    else if (part.startsWith('`')) {
       const value = part.slice(1, -1);
       appendLink(value, value, true);
     } else if (part.startsWith('**')) { const strong = el('strong'); inline(strong, part.slice(2, -2), options); parent.append(strong); }
@@ -54,8 +60,22 @@ function inline(parent, text, options) {
 }
 export function prose(text, options = {}) {
   const node = el('div', undefined, 'prose');
-  let code, paragraph, list;
+  let code, paragraph, list, math, mathEnd;
   for (const line of String(text || '').split('\n')) {
+    if (!code && math) {
+      const end = line.indexOf(mathEnd);
+      if (end < 0) math.push(line);
+      else {
+        math.push(line.slice(0, end)); node.append(equation(math.join('\n'), true));
+        math = undefined;
+        if (line.slice(end + mathEnd.length).trim()) { const p = el('p'); inline(p, line.slice(end + mathEnd.length), options); node.append(p); }
+      }
+      continue;
+    }
+    if (!code && /^(?:\$\$|\\\[)\s*$/.test(line.trim())) {
+      math = []; mathEnd = line.trim() === '$$' ? '$$' : '\\]';
+      paragraph = undefined; list = undefined; continue;
+    }
     if (/^\s*```/.test(line)) {
       if (code) code = undefined;
       else { code = el('pre'); node.append(code); }
@@ -78,6 +98,7 @@ export function prose(text, options = {}) {
       inline(paragraph, line, options);
     }
   }
+  if (math) node.append(el('pre', `${mathEnd === '$$' ? '$$' : '\\['}\n${math.join('\n')}`));
   const candidates = [...node.querySelectorAll('[data-file-candidate]')];
   if (candidates.length) void verifyFiles(candidates, options);
   return node;

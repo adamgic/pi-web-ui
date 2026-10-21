@@ -163,3 +163,10 @@ absolute paths, `../`, `~/`, and `file://` links are supported. Binary files are
 External Markdown and text-file URLs are fetched on click and shown in the
 built-in preview. Ordinary web pages open directly. Remote reads time out after
 15 seconds and do not forward the launch token or browser cookies. File links refer to the machine running Pi.
+
+Math in Markdown previews and responses is rendered locally with bundled KaTeX
+as accessible MathML. Inline `$...$` and `\(...\)`, display `$$...$$`, and
+multiline `\[...\]` support fractions, subscripts, superscripts, vectors, and
+aligned equations. Code spans and fenced code stay literal; invalid equations
+fall back to their source. The source toggle always shows the original file.
+No browser extension or CDN connection is required.
