@@ -336,6 +336,45 @@ try {
   assert.equal(edgeMath.errors, 1);
   assert.match(edgeMath.code, /\$x\$/);
   results.push({ test: 'Tidal document equations, fractions, aligned groups, source toggle, code exclusions and invalid math fallback', status: 'pass', equations: expectedMath });
+  const openSource = async filename => {
+    await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/${filename}` })}#token=${server.token}` });
+    await until(() => evaluate("Boolean(document.querySelector('.source-code'))"), `source preview ${filename}`);
+    assert.equal(await evaluate("document.querySelector('.source-code').textContent"), await readFile(`${root}test/fixtures/${filename}`, 'utf8'));
+  };
+  await openSource('nesting.py');
+  assert.equal(await evaluate("document.getElementById('highlight-mode').value"), 'nesting');
+  assert.ok(await evaluate("new Set([...document.querySelectorAll('[data-depth]')].map(n => n.dataset.depth)).size >= 4"));
+  for (const theme of ['light', 'dark']) {
+    await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    const colors = await evaluate("[...document.querySelectorAll('#color-legend span')].map(n => getComputedStyle(n).color)");
+    assert.equal(new Set(colors).size, 5);
+    assert.equal(colors[0], theme === 'light' ? 'rgb(23, 86, 169)' : 'rgb(128, 186, 255)');
+    await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/python-nesting-${theme}.png`, Buffer.from(result.data, 'base64')));
+  }
+  await evaluate("document.getElementById('highlight-mode').value = 'standard'; document.getElementById('highlight-mode').dispatchEvent(new Event('change'))");
+  assert.ok(await evaluate("Boolean(document.querySelector('.hljs-keyword')) && !document.querySelector('[data-depth]')"));
+  assert.equal(await evaluate("document.querySelector('.source-code').textContent"), await readFile(`${root}test/fixtures/nesting.py`, 'utf8'));
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/python-standard-dark.png`, Buffer.from(result.data, 'base64')));
+  await openSource('nesting.json');
+  assert.equal(await evaluate("document.getElementById('highlight-mode').value"), 'standard');
+  assert.ok(await evaluate("Boolean(document.querySelector('.hljs-attr'))"));
+  await evaluate("document.getElementById('highlight-mode').value = 'nesting'; document.getElementById('highlight-mode').dispatchEvent(new Event('change'))");
+  const jsonDepths = await evaluate("[...document.querySelectorAll('[data-depth]')].map(n => ({ text: n.textContent, depth: Number(n.dataset.depth) }))");
+  assert.equal(jsonDepths.find(n => n.text.includes('\"project\"')).depth, 0);
+  assert.equal(jsonDepths.find(n => n.text.includes('\"settings\"')).depth, 2);
+  assert.equal(jsonDepths.find(n => n.text.includes('\"enabled\"')).depth, 4);
+  assert.equal(jsonDepths.find(n => n.text.includes('true')).depth, 5);
+  for (const theme of ['light', 'dark']) {
+    await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/json-nesting-${theme}.png`, Buffer.from(result.data, 'base64')));
+  }
+  const safeCode = await evaluate(`(async () => {
+    const { highlightedCode } = await import('/highlighting.js');
+    const source = '<script>alert(1)</script>';
+    return ['standard', 'nesting'].map(mode => { const node = highlightedCode(source, 'xml', mode); return { text: node.textContent, scripts: node.querySelectorAll('script').length }; });
+  })()`);
+  assert.deepEqual(safeCode, [{ text: '<script>alert(1)</script>', scripts: 0 }, { text: '<script>alert(1)</script>', scripts: 0 }]);
+  results.push({ test: 'Python/JSON depth colors, standard Highlight.js, persistent toggle, exact source, light/dark palettes and safe markup', status: 'pass' });
   assert.deepEqual(exceptions, []);
   results.push({ test: 'browser controls, safe rendering, streaming, reload without replay', status: 'pass' });
   results.push({ test: 'Arrow Up recall, draft preservation, recall after reload, thinking animation, idle reset and reduced motion', status: 'pass' });

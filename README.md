@@ -170,3 +170,23 @@ multiline `\[...\]` support fractions, subscripts, superscripts, vectors, and
 aligned equations. Code spans and fenced code stay literal; invalid equations
 fall back to their source. The source toggle always shows the original file.
 No browser extension or CDN connection is required.
+
+Source previews default to **Nesting levels** coloring. The **Coloring** selector
+switches to **Standard syntax** (bundled Highlight.js 11.12.0, common languages)
+and remembers the choice in this browser. No extension or CDN is needed.
+
+- Python: indentation levels plus nested parentheses, lists, and dictionaries.
+- JSON: root keys use level 0, values level 1, nested keys level 2, their values
+  level 3, and so on. Array items add a level too.
+- YAML: indentation and bracket nesting.
+- Other recognized languages: structural bracket nesting, including JavaScript,
+  TypeScript, C/C++, Java, Go, Rust, and CSS. This is a lightweight lexical view,
+  not a full language parser; template interpolation and language-specific block
+  keywords are not independently colored. Standard syntax mode is available for
+  the language's conventional token coloring. Unrecognized extensions stay plain.
+
+The named palette repeats **blue → orange → green → pink → purple**, with
+separate light/dark shades that follow the browser's appearance setting. All
+nesting shades meet 4.5:1 contrast against the UI and code backgrounds. Hovering
+a colored section shows its actual level and color, including levels beyond the
+five-color cycle. Both modes preserve the exact source text and indentation.

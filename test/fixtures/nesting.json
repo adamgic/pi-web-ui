@@ -1,0 +1,14 @@
+{
+  "project": {
+    "name": "Tidal forces",
+    "settings": {
+      "enabled": true,
+      "count": 42
+    },
+    "locations": [
+      { "name": "Kiel", "latitude": 54.321 },
+      { "name": "Brest", "latitude": 48.390 }
+    ]
+  },
+  "status": "ready"
+}
