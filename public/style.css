@@ -159,3 +159,9 @@
 .transcript-actions{min-height:0;justify-content:flex-end}
 .message header{align-items:center;justify-content:space-between}
 .copy-response{font-size:11px;font-weight:400;letter-spacing:normal;text-transform:none;padding:3px 6px}
+
+.copy-response{display:flex;margin-left:auto;align-items:center;justify-content:center;width:30px;height:30px;padding:5px;flex-shrink:0}
+.copy-icon{position:relative;display:block;width:18px;height:18px}
+.copy-icon::before,.copy-icon::after{content:"";position:absolute;width:12px;height:13px;border:1.5px solid currentColor;border-radius:3px}
+.copy-icon::before{left:1px;top:1px}
+.copy-icon::after{left:5px;top:5px;background:var(--bg)}
