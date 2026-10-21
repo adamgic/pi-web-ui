@@ -77,13 +77,27 @@ try {
   assert.equal(await evaluate('getComputedStyle(document.documentElement).colorScheme'), 'light');
   assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(248, 250, 249)');
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/desktop-empty.png`, Buffer.from(result.data, 'base64')));
-  for (const [width, height] of [[1440, 1000], [1024, 768], [768, 650], [600, 700]]) {
+  for (const [width, height] of [[1440, 1000], [1024, 768], [768, 650], [1024, 500], [600, 700]]) {
     await viewport(width, height); await pause(120);
     const dimensions = await evaluate('({width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight})');
     assert.ok(dimensions.scrollWidth <= width, JSON.stringify(dimensions));
-    assert.ok(dimensions.scrollHeight <= height, JSON.stringify(dimensions));
+    assert.ok(dimensions.scrollHeight <= height, JSON.stringify({ ...dimensions, boxes: await evaluate("[...document.querySelectorAll('.app,.workspace,.sidebar,main,main>*')].map(n=>({tag:n.tagName,cls:n.className,top:n.getBoundingClientRect().top,bottom:n.getBoundingClientRect().bottom,height:n.clientHeight,scroll:n.scrollHeight}))") }));
     results.push({ test: 'viewport without page overflow', ...dimensions });
   }
+  assert.equal(await evaluate("document.getElementById('cwd').textContent"), '/example/project');
+  const readyFont = await evaluate("getComputedStyle(document.getElementById('status')).fontSize");
+  await viewport(1024, 500);
+  assert.ok(await evaluate("document.querySelector('.sidebar').scrollHeight > document.querySelector('.sidebar').clientHeight"));
+  assert.ok(await evaluate("document.getElementById('status').getBoundingClientRect().bottom <= document.getElementById('prompt').getBoundingClientRect().top"));
+  assert.ok(await evaluate("document.querySelector('.sidebar').contains(document.getElementById('usage'))"));
+  await evaluate("document.getElementById('session-id').focus()");
+  assert.equal(await evaluate("getComputedStyle(document.getElementById('session-id-tooltip')).display"), 'block');
+  assert.equal(await evaluate("document.getElementById('session-id-tooltip').textContent"), f.state.id);
+  await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
+  await cdp('Browser.grantPermissions', { origin: new URL(server.url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  await evaluate("document.getElementById('session-id').click()");
+  await until(() => evaluate("document.getElementById('copy-status').textContent === 'Session ID copied'"), 'copy session ID');
+  assert.equal(await evaluate('navigator.clipboard.readText()'), f.state.id);
   await viewport(390, 500); await pause(150);
   const tiny = await evaluate('({width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight})');
   assert.ok(tiny.scrollHeight > tiny.height); assert.ok(tiny.scrollWidth <= tiny.width); results.push({ test: 'tiny viewport vertical fallback', ...tiny });
@@ -181,6 +195,7 @@ try {
   await until(() => evaluate("document.querySelector('.tool-card') !== null"), 'streaming tool card');
   await until(() => evaluate("document.getElementById('status').textContent === 'Thinking…'"), 'thinking indicator');
   assert.equal(await evaluate("getComputedStyle(document.getElementById('status')).animationName"), 'thinking-shimmer');
+  assert.equal(await evaluate("getComputedStyle(document.getElementById('status')).fontSize"), readyFont);
   const position = await evaluate("getComputedStyle(document.getElementById('status')).backgroundPosition");
   await pause(150);
   assert.notEqual(await evaluate("getComputedStyle(document.getElementById('status')).backgroundPosition"), position);
@@ -239,6 +254,13 @@ try {
   assert.equal(await input(), 'Original session draft');
   assert.equal(await evaluate("document.querySelectorAll('#transcript .message.user').length"), 2);
   results.push({ test: 'New session, saved session picker, unchanged connection, restored history and per-session drafts', status: 'pass' });
+  await until(() => evaluate("document.querySelector('#conversations button:not(:disabled)') !== null"), 'sidebar session list');
+  await evaluate("document.querySelector('#conversations button:not(:disabled)').click()");
+  await until(() => evaluate("document.getElementById('session-id').textContent.includes('new-browser-session')"), 'sidebar session switch');
+  assert.equal(await input(), 'New session draft');
+  await evaluate("document.getElementById('sidebar-new-session').click()");
+  await until(() => evaluate("document.getElementById('sidebar-new-session').disabled === false"), 'sidebar new session');
+  results.push({ test: 'Full directory path, sidebar usage, short-window scrolling, status position and size, ID tooltip and clipboard, sidebar session controls', status: 'pass' });
   await evaluate("document.getElementById('prompt').value = '/login'; document.getElementById('send').click()");
   await until(() => evaluate("document.getElementById('alerts').textContent.includes('terminal')"), 'terminal-only command guidance');
   assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2);

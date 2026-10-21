@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { sep } from 'node:path';
 import { textContent } from '../public/view.js';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -52,8 +54,11 @@ export function createBridge(pi, { listSessions: discoverSessions = async () => 
       (entry.type === 'message' && JSON.stringify(entry.message) === JSON.stringify(message)) ||
       (entry.type === 'custom_message' && message.role === 'custom' && entry.customType === message.customType && JSON.stringify(entry.content) === JSON.stringify(message.content))));
     const models = ctx.modelRegistry.getAvailable().map(model => ({ provider: model.provider, modelId: model.id, name: model.name, contextWindow: model.contextWindow }));
+    const home = homedir();
+    const displayCwd = ctx.cwd === home ? '~' : ctx.cwd.startsWith(home + sep) ? '~' + ctx.cwd.slice(home.length) : ctx.cwd;
+    const firstPrompt = entries.find(entry => entry.type === 'message' && entry.message.role === 'user')?.message;
     return {
-      session: { id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, file: ctx.sessionManager.getSessionFile(), name: pi.getSessionName() || 'Current session' },
+      session: { displayCwd, created: ctx.sessionManager.getHeader()?.timestamp, id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, file: ctx.sessionManager.getSessionFile(), name: pi.getSessionName() || textContent(firstPrompt?.content).trim().slice(0, 160) || 'New session' },
       entries, completed, streaming, tools: [...tools.values()], models,
       model: ctx.model ? { provider: ctx.model.provider, modelId: ctx.model.id } : undefined,
       thinkingLevel: pi.getThinkingLevel(), busy: !ctx.isIdle(), compacting,

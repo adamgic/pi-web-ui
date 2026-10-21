@@ -9,7 +9,7 @@ let localError = '', selectedConversation, submitting = false;
 const drafts = new Map();
 const submittedPrompts = new Map();
 let historyNavigation;
-let sessions = [];
+let sessions = [], sessionsRequest = 0, sessionsKey = "";
 const opened = new Map();
 const transcript = $('transcript');
 const welcome = transcript.firstElementChild;
@@ -99,8 +99,8 @@ function renderTranscript() {
   transcript.scrollTop = following ? transcript.scrollHeight : scroll;
 }
 function renderNavigation() {
-  $('conversations').replaceChildren(el('p', view.session.name, 'muted'));
-  $('conversation-count').textContent = '1';
+  const key = JSON.stringify([view.session.id, view.session.name, view.entries.length, view.busy]);
+  if (key !== sessionsKey && !view.busy && !view.switching) { sessionsKey = key; void refreshSessions(); }
   $('tasks').replaceChildren(...view.activeTools.map(name => el('div', name, 'task')));
 }
 function controls() {
@@ -114,7 +114,8 @@ function controls() {
     const changingDisabled = !online || pending || view.busy || view.compacting || view.pendingMessages || view.switching;
     $('sessions').disabled = changingDisabled;
     $('new-session').disabled = changingDisabled;
-    document.querySelectorAll('#session-list button').forEach(button => { button.disabled = changingDisabled || button.dataset.current === 'true'; });
+    $('sidebar-new-session').disabled = changingDisabled;
+    document.querySelectorAll('#session-list button, #conversations button').forEach(button => { button.disabled = changingDisabled || button.dataset.current === 'true'; });
     if (view.switching) document.querySelectorAll('[data-control]').forEach(button => { button.disabled = true; });
   }
   const working = online && Boolean(submitting || view?.busy || view?.compacting);
@@ -134,13 +135,23 @@ function render() {
     if (selectedConversation !== undefined) drafts.set(selectedConversation, historyNavigation?.draft.text ?? prompt.value);
     historyNavigation = undefined;
     prompt.value = drafts.get(id) || '';
+    sessions = []; filterSessions(); $('copy-status').textContent = '';
     selectedConversation = id; following = true; opened.clear();
   }
 
-  $('cwd').textContent = view.session.cwd.split(/[\\/]/).filter(Boolean).at(-1) || view.session.cwd;
+  $('cwd').textContent = view.session.displayCwd || view.session.cwd;
   $('cwd').title = view.session.cwd;
   $('session-id').textContent = `SESSION ${view.session.id}`;
-  $('session-id').title = view.session.file || 'In-memory session';
+  $('session-id-tooltip').textContent = view.session.id;
+  $('session-name').textContent = view.session.name;
+  const messages = transcriptOf(view).filter(item => ['user', 'assistant'].includes(item.type));
+  renderMetadata($('session-details'), [
+    ['Created', view.session.created ? new Date(view.session.created).toLocaleString() : 'Unknown'],
+    ['Branch messages', messages.length],
+    ['Provider', view.model?.provider || 'None selected'],
+    ['Model', view.model?.modelId || 'None selected'],
+    ['Session file', view.session.file || 'In memory'],
+  ]);
   $('conversation-title').textContent = view.session.name;
   $('model').textContent = view.model?.modelId || 'Select model';
   $('model').title = view.model ? `${view.model.provider}/${view.model.modelId}` : 'Choose a model';
@@ -148,9 +159,13 @@ function render() {
   const usage = usageOf(view);
   const format = number => Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(number);
   const model = view.models.find(m => m.provider === view.model?.provider && m.modelId === view.model?.modelId);
-  const context = model?.contextWindow && usage.context != null ? ` · ${(usage.context / model.contextWindow * 100).toFixed(1)}% context` : '';
-  $('usage').textContent = `↑ ${format(usage.input)} ↓ ${format(usage.output)} · $${usage.cost.toFixed(3)}${context}`;
-  $('usage').title = `Cache read: ${usage.cacheRead}; cache write: ${usage.cacheWrite}. Cost is provider-reported or estimated usage, not an invoice.`;
+  const windowSize = view.context?.contextWindow || model?.contextWindow;
+  renderMetadata($('usage'), [
+    ['Input tokens', format(usage.input)], ['Output tokens', format(usage.output)],
+    ['Cache read', format(usage.cacheRead)], ['Cache write', format(usage.cacheWrite)],
+    ['Context used', usage.context == null ? 'Unknown' : `${format(usage.context)}${windowSize ? ` / ${format(windowSize)} (${(usage.context / windowSize * 100).toFixed(1)}%)` : ''}`],
+    ['Context capacity', windowSize ? format(windowSize) : 'Unknown'], ['Cost', `$${usage.cost.toFixed(3)}`],
+  ]);
   $('queue').hidden = !view.pendingMessages;
   $('queue').replaceChildren(el('p', 'Pi has queued messages. They will appear in the transcript when consumed.'));
   renderTranscript(); renderNavigation(); alerts(); controls();
@@ -179,33 +194,51 @@ async function showModels() {
     $('model-search').value = ''; filterModels(); $('model-dialog').showModal(); $('model-search').focus();
   } catch (error) { localError = error.message; alerts(); }
 }
-async function showSessions() {
+function renderMetadata(node, rows) {
+  node.replaceChildren(...rows.flatMap(([label, value]) => [el('dt', label), el('dd', value)]));
+}
+async function refreshSessions() {
+  const request = ++sessionsRequest;
+  const id = selectedConversation;
   try {
-    localError = ''; alerts();
     const response = await fetch('/api/sessions', { headers: { Authorization: `Bearer ${token}` } });
     const result = await response.json();
+    if (request !== sessionsRequest || id !== selectedConversation) return;
     if (!response.ok) throw new Error(result.error || 'Unable to load sessions.');
-    if (result.sessionId !== selectedConversation) throw new Error('Session changed. Open the picker again.');
+    if (result.sessionId !== id) return;
     sessions = result.sessions;
-    $('session-search').value = '';
+    $('sidebar-session-error').hidden = true;
     filterSessions();
-    $('session-dialog').showModal();
-    $('session-search').focus();
-  } catch (error) { localError = error.message; alerts(); }
+  } catch (error) {
+    if (request !== sessionsRequest || id !== selectedConversation) return;
+    $('sidebar-session-error').textContent = error.message;
+    $('sidebar-session-error').hidden = false;
+    if ($('session-dialog').open) { localError = error.message; alerts(); }
+  }
+}
+async function showSessions() {
+  $('session-search').value = '';
+  filterSessions();
+  $('session-dialog').showModal();
+  $('session-search').focus();
+  await refreshSessions();
 }
 function filterSessions() {
-  const query = $('session-search').value.toLowerCase();
-  const list = $('session-list');
-  list.replaceChildren();
-  for (const session of sessions.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query))) {
-    const current = session.id === selectedConversation;
-    const button = el('button', session.name, current ? 'selected' : '');
-    button.dataset.current = String(current);
-    button.append(el('small', `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}`));
-    button.onclick = async () => { if (await run('switch-session', { path: session.path })) $('session-dialog').close(); };
-    list.append(button);
+  for (const [listId, searchId] of [['session-list', 'session-search'], ['conversations', 'sidebar-session-search']]) {
+    const query = $(searchId).value.toLowerCase();
+    const list = $(listId);
+    list.replaceChildren();
+    for (const session of sessions.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query))) {
+      const current = session.id === selectedConversation;
+      const button = el('button', session.name, current ? 'selected active' : '');
+      button.dataset.current = String(current);
+      if (current) button.setAttribute('aria-current', 'true');
+      button.append(el('small', `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}`));
+      button.onclick = async () => { if (await run('switch-session', { path: session.path })) $('session-dialog').close(); };
+      list.append(button);
+    }
+    if (!list.children.length) list.append(el('p', 'No saved sessions match. New sessions appear after Pi saves them.', 'muted'));
   }
-  if (!list.children.length) list.append(el('p', 'No saved sessions match. New sessions appear here after Pi saves them.', 'muted'));
   controls();
 }
 function filterModels() {
@@ -249,6 +282,13 @@ $('abort').onclick = () => run('abort');
 $('model').onclick = showModels;
 $('sessions').onclick = showSessions;
 $('session-search').oninput = filterSessions;
+$('sidebar-session-search').oninput = filterSessions;
+$('refresh-sessions').onclick = refreshSessions;
+$('sidebar-new-session').onclick = () => run('new-session');
+$('session-id').onclick = async () => {
+  try { await navigator.clipboard.writeText(view.session.id); $('copy-status').textContent = 'Session ID copied'; }
+  catch { $('copy-status').textContent = 'Copy unavailable. Select the ID shown on hover to copy.'; }
+};
 $('new-session').onclick = async () => { if (await run('new-session')) $('session-dialog').close(); };
 $('thinking').onclick = () => run('thinking');
 $('compact').onclick = () => $('compact-dialog').showModal();

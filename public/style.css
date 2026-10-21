@@ -99,3 +99,49 @@
 @media(forced-colors:active){
   #status.working{animation:none;background:none;color:CanvasText;-webkit-text-fill-color:currentColor}
 }
+/* Session sidebar scrolls independently of the conversation. */
+.sidebar{display:block;overflow-y:auto;scrollbar-width:thin;padding-bottom:8px}
+.session-meta{padding:20px 18px}
+.session-meta strong{white-space:normal;overflow-wrap:anywhere;line-height:1.5}
+#cwd{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;margin-bottom:20px}
+.session-id-wrap{position:relative}
+#session-id{width:100%;text-align:left;padding:6px 0;cursor:copy}
+#session-id-tooltip{display:none;position:absolute;z-index:2;top:100%;left:0;right:0;padding:10px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;box-shadow:0 4px 15px var(--dialog-shadow);font:12px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;user-select:all}
+.session-id-wrap:hover #session-id-tooltip,.session-id-wrap:focus-within #session-id-tooltip{display:block}
+#copy-status{font-size:11px}
+.metadata{margin:12px 0 0;font-size:12px;line-height:1.5;display:grid;grid-template-columns:minmax(0,1fr);gap:3px}
+.metadata dt{color:var(--muted);font-size:11px;margin-top:6px}
+.metadata dd{margin:0;overflow-wrap:anywhere}
+.usage-section{padding:18px;border-bottom:1px solid var(--line)}
+.usage-section h2{font-size:12px;color:var(--muted)}
+#usage{grid-template-columns:auto minmax(0,1fr);gap:8px}
+#usage dt{margin:0}#usage dd{text-align:right;font-variant-numeric:tabular-nums}
+.usage-note{font-size:10px;line-height:1.5;margin-top:12px}
+.conversation-section{padding:18px 13px}
+.conversation-section .section-title{padding:0 0 12px;gap:8px}
+#sidebar-new-session{font-size:11px;padding:6px 8px}
+#sidebar-session-search{width:100%;min-width:0;padding:9px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--text)}
+#refresh-sessions{font-size:11px;margin:5px 0;text-align:left}
+#conversations{max-height:300px;min-height:60px;overflow:auto}
+#conversations button{overflow-wrap:anywhere;font-size:12px}
+#conversations small{white-space:normal;line-height:1.5}
+#conversations>p,#sidebar-session-error{font-size:12px;padding:8px}
+.task-list{display:flex;flex-wrap:wrap;gap:6px;overflow:visible}
+.task{margin:0;padding:5px 8px}.task-section{padding-bottom:18px}
+.statusbar{padding:8px 30px 0;min-height:28px;font-size:12px}
+#status,#status.working{font-size:12px;font-weight:500;line-height:20px}
+.composer{margin-bottom:16px}
+.conversation-bar>div:first-child{min-width:0}
+#conversation-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40vw}
+@media(max-width:1050px){#conversation-title{max-width:65vw}}
+@media(max-width:700px){.statusbar{padding:8px 16px 0}}
+/* Short desktop windows retain the independently scrollable sidebar. */
+@media(min-width:701px) and (max-height:560px){
+  body{overflow:hidden}.app{height:100dvh;min-height:0;grid-template-rows:60px minmax(0,1fr)}
+  .workspace{min-height:0;grid-template-columns:210px minmax(0,1fr)}.sidebar{display:block}
+  main{grid-template-rows:auto auto minmax(0,1fr) auto auto auto auto}
+  .transcript{min-height:0;max-height:none}.conversation-bar{padding:8px 18px;gap:6px}
+  .composer textarea{min-height:50px;padding:8px 17px;height:65px}
+}
+.sidebar{position:relative}
+.conversation-section{border-bottom:1px solid var(--line)}
