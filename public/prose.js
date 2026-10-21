@@ -6,9 +6,13 @@ function el(tag, text, className) {
 }
 // Markdown is rendered using DOM text nodes only; model/tool HTML is never executed.
 export function linkTarget(value, { token = '', cwd = '' } = {}) {
-  if (/^https?:\/\//i.test(value)) return value;
+  if (/^https?:\/\//i.test(cwd) && !/^[a-z][a-z0-9+.-]*:/i.test(value)) value = new URL(value, cwd).href;
+  if (/^https?:\/\//i.test(value)) {
+    // Web pages retain their native viewer; text/Markdown files use our preview.
+    if (!/\.(?:md|markdown|txt|json|csv|log|ya?ml|xml|js|ts|py|css)$/i.test(new URL(value).pathname)) return value;
+  }
   if (value.startsWith('#')) return value;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value.replace(/:\d+(?::\d+)?$/, '')) && !value.startsWith('file:')) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value.replace(/:\d+(?::\d+)?$/, '')) && !/^(?:file:|https?:)/i.test(value)) return null;
   if (value.startsWith('//')) return null;
   if (value.startsWith('file:')) {
     try { const url = new URL(value); if (url.hostname && url.hostname !== 'localhost') return null; value = decodeURIComponent(url.pathname); }
@@ -24,6 +28,10 @@ function inline(parent, text, options) {
     const content = code ? el('code', label) : document.createTextNode(label);
     if (!href) { parent.append(content); return; }
     const a = el('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.append(content); parent.append(a);
+    if (href.startsWith('/preview.html') && !/^https?:/i.test(new URL(href, location.origin).searchParams.get('path')) && options?.checkFiles !== false) {
+      a.dataset.fileCandidate = href;
+      a.removeAttribute('href');
+    }
   };
   let end = 0;
   for (const match of text.matchAll(pattern)) {
@@ -31,8 +39,7 @@ function inline(parent, text, options) {
     const part = match[0];
     if (part.startsWith('`')) {
       const value = part.slice(1, -1);
-      if (/^(?:https?:\/\/|file:|\/|\.\.?\/)/.test(value) || /^[\w@./ -]+\.[a-zA-Z0-9]+(?::\d+(?::\d+)?)?$/.test(value)) appendLink(value, value, true);
-      else parent.append(el('code', value));
+      appendLink(value, value, true);
     } else if (part.startsWith('**')) { const strong = el('strong'); inline(strong, part.slice(2, -2), options); parent.append(strong); }
     else if (part.startsWith('[')) {
       const split = part.indexOf('](');
@@ -71,5 +78,23 @@ export function prose(text, options = {}) {
       inline(paragraph, line, options);
     }
   }
+  const candidates = [...node.querySelectorAll('[data-file-candidate]')];
+  if (candidates.length) void verifyFiles(candidates, options);
   return node;
+}
+
+async function verifyFiles(candidates, { token = '' } = {}) {
+  for (let offset = 0; offset < candidates.length; offset += 256) {
+    const group = candidates.slice(offset, offset + 256);
+    const urls = group.map(a => new URL(a.dataset.fileCandidate, location.origin));
+    try {
+      const response = await fetch(`/api/files/exists?${new URLSearchParams({ cwd: urls[0].searchParams.get('cwd') || '' })}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: urls.map(url => url.searchParams.get('path')) }),
+      });
+      if (!response.ok) throw new Error('File check failed');
+      const { exists } = await response.json();
+      group.forEach((a, index) => { if (exists[index]) a.href = a.dataset.fileCandidate; else a.replaceWith(...a.childNodes); delete a.dataset.fileCandidate; });
+    } catch { group.forEach(a => a.replaceWith(...a.childNodes)); }
+  }
 }

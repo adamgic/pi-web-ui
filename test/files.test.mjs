@@ -14,7 +14,7 @@ test('link destinations preserve web URLs and encode local paths safely', () => 
   assert.equal(url.hash, '#token=secret');
 });
 
-test('file previews require authentication and confine reads including symlinks', async t => {
+test('file previews require authentication and allow reads outside the working directory including symlinks', async t => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'pi-preview-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const root = join(dir, 'root');
@@ -30,7 +30,29 @@ test('file previews require authentication and confine reads including symlinks'
   const response = await get('My Notes.md:12:3');
   assert.equal(response.status, 200);
   assert.equal((await response.json()).content, '# Hello\n<script>alert(1)</script>');
-  for (const path of ['../outside.txt', join(dir, 'outside.txt'), 'escape.txt']) assert.equal((await get(path)).status, 403);
+  for (const path of ['../outside.txt', join(dir, 'outside.txt'), 'escape.txt']) assert.equal((await get(path)).status, 200);
+  const check = await fetch(`${server.origin}/api/files/exists`, { method: 'POST', headers: { Authorization: `Bearer ${server.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ paths: ['My Notes.md', '../outside.txt', 'escape.txt', 'missing', '.'] }) });
+  assert.deepEqual((await check.json()).exists, [true, true, true, false, false]);
+  assert.equal((await fetch(`${server.origin}/api/files/exists`, { method: 'POST' })).status, 401);
   assert.equal((await get('missing')).status, 404);
   assert.equal((await get('binary')).status, 415);
+});
+
+test('external Markdown is fetched on request and external failures are reported', async t => {
+  const { createServer } = await import('node:http');
+  const remote = createServer((req, res) => {
+    if (req.url === '/notes.md') { res.setHeader('Content-Type', 'text/markdown'); res.end('# External notes'); }
+    else { res.writeHead(404); res.end(); }
+  });
+  await new Promise(resolve => remote.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => remote.close(resolve)));
+  const server = await startServer({ subscribe: () => () => {}, current: () => ({ session: { cwd: '/tmp' } }) });
+  t.after(() => server.close());
+  const path = `http://127.0.0.1:${remote.address().port}/notes.md`;
+  assert.match(linkTarget(path), /^\/preview.html/);
+  const get = path => fetch(`${server.origin}/api/file?${new URLSearchParams({ path })}`, { headers: { Authorization: `Bearer ${server.token}` } });
+  const response = await get(path);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).content, '# External notes');
+  assert.equal((await get(path + '/missing')).status, 502);
 });

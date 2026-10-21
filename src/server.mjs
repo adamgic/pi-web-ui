@@ -2,7 +2,8 @@ import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { realpath, stat, readFile } from 'node:fs/promises';
 
-import { resolve, relative, isAbsolute } from 'node:path';
+import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 
 const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
@@ -83,22 +84,52 @@ export async function startServer(bridge, { port = 0 } = {}) {
       const url = new URL(req.url, origin);
       if (url.pathname.startsWith('/api/')) {
         if (!authorized(req)) throw error(401, 'Open the full launch URL printed in the terminal.');
+        const localPath = value => {
+          if (typeof value !== 'string' || !value || value.includes('\0')) throw error(400, 'Invalid file path.');
+          if (value.startsWith('file:')) {
+            const file = new URL(value);
+            if (file.hostname && file.hostname !== 'localhost') throw error(400, 'Invalid file host.');
+            value = decodeURIComponent(file.pathname);
+          }
+          value = value.replace(/:\d+(?::\d+)?$/, '');
+          if (value.startsWith('~/')) value = resolve(homedir(), value.slice(2));
+          return resolve(url.searchParams.get('cwd') || bridge.current().session.cwd, value);
+        };
+        if (req.method === 'POST' && url.pathname === '/api/files/exists') {
+          const input = await body(req);
+          if (!Array.isArray(input?.paths) || input.paths.length > 256) throw error(400, 'Expected up to 256 paths.');
+          const exists = await Promise.all(input.paths.map(async value => {
+            try { return (await stat(localPath(value))).isFile(); } catch { return false; }
+          }));
+          json(res, 200, { exists }); return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/file') {
           const requested = url.searchParams.get('path');
-          if (!requested || requested.includes('\0')) throw error(400, 'Invalid file path.');
-          const root = await realpath(bridge.current().session.cwd);
-          const within = path => { const rel = relative(root, path); return rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel); };
-          const candidate = resolve(url.searchParams.get('cwd') || root, requested.replace(/:\d+(?::\d+)?$/, ''));
-          if (!within(candidate)) throw error(403, 'File is outside the session working directory.');
-          let path, info;
-          try { path = await realpath(candidate); info = await stat(path); }
-          catch { throw error(404, 'File not found.'); }
-          if (!within(path)) throw error(403, 'File is outside the session working directory.');
-          if (!info.isFile()) throw error(400, 'This path is not a file.');
-          if (info.size > 2 * 1024 * 1024) throw error(413, 'Preview is limited to files up to 2 MiB.');
-          const bytes = await readFile(path);
+          let path, bytes, type = '';
+          if (/^https?:\/\//i.test(requested || '')) {
+            let remote;
+            try { remote = await fetch(requested, { signal: AbortSignal.timeout(15000) }); }
+            catch { throw error(502, 'Could not fetch the external file.'); }
+            if (!remote.ok) { await remote.body?.cancel(); throw error(502, `External server returned ${remote.status}.`); }
+            path = remote.url; type = remote.headers.get('content-type') || '';
+            const chunks = []; let size = 0;
+            for await (const chunk of remote.body) {
+              size += chunk.length;
+              if (size > 2 * 1024 * 1024) throw error(413, 'Preview is limited to files up to 2 MiB.');
+              chunks.push(chunk);
+            }
+            bytes = Buffer.concat(chunks);
+          } else {
+            const candidate = localPath(requested);
+            let info;
+            try { path = await realpath(candidate); info = await stat(path); }
+            catch { throw error(404, 'File not found or unavailable.'); }
+            if (!info.isFile()) throw error(400, 'This path is not a file.');
+            if (info.size > 2 * 1024 * 1024) throw error(413, 'Preview is limited to files up to 2 MiB.');
+            try { bytes = await readFile(path); } catch { throw error(403, 'This file cannot be read.'); }
+          }
           if (bytes.includes(0)) throw error(415, 'Binary files cannot be displayed as text.');
-          json(res, 200, { path, content: bytes.toString('utf8') }); return;
+          json(res, 200, { path, type, content: bytes.toString('utf8') }); return;
         }
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
           json(res, 200, await bridge.listSessions()); return;

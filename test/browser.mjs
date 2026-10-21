@@ -76,9 +76,18 @@ try {
   await until(() => evaluate("document.getElementById('connection')?.textContent === 'Connected'"), 'UI connection');
   const links = await evaluate(`(async () => {
     const { prose } = await import('/prose.js');
-    const node = prose('[Notes](<docs/My Notes.md>) README.md:12 https://example.com \`src/app.js\`\\n<script>bad()</script>', { token: 'test', cwd: '/example/project' });
+    const node = prose('[Notes](<docs/My Notes.md>) README.md:12 https://example.com \`src/app.js\`\\n<script>bad()</script>', { token: 'test', cwd: '/example/project', checkFiles: false });
     return { links: [...node.querySelectorAll('a')].map(a => ({ href: a.getAttribute('href'), target: a.target, rel: a.rel })), scripts: node.querySelectorAll('script').length };
   })()`);
+  const checked = await evaluate(`(async () => {
+    const { prose } = await import('/prose.js');
+    const node = prose(${JSON.stringify('`' + root + 'README.md` `missing-file.md`')}, { token: ${JSON.stringify(server.token)}, cwd: '/example/project' });
+    for (let i = 0; i < 100 && node.querySelector('[data-file-candidate]'); i++) await new Promise(r => setTimeout(r, 20));
+    return { count: node.querySelectorAll('a[href]').length, text: node.textContent, href: node.querySelector('a[href]')?.getAttribute('href') };
+  })()`);
+  assert.equal(checked.count, 1);
+  assert.match(checked.href, /README.md/);
+  assert.match(checked.text, /missing-file.md/);
   assert.equal(links.links.length, 4);
   assert.equal(links.scripts, 0);
   assert.ok(links.links.every(a => a.target === '_blank' && a.rel.includes('noopener')));

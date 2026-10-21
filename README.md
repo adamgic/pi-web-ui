@@ -155,7 +155,11 @@ Local `.md` and `.markdown` files open in the built-in Markdown preview with a
 source toggle; no browser extension is required. The lightweight renderer supports
 headings, paragraphs, lists, bold, inline code, fenced code, and links. Raw HTML
 is displayed as text. Other text files open as source. Preview reads require the
-launch token, are confined to the current session working directory (including
-symlink targets), and are limited to 2 MiB. Binary files are not previewed.
-External URLs open their original website; external Markdown rendering depends
-on that website. File links refer to the machine running Pi.
+launch token and are limited to 2 MiB. Any file readable by the Pi process can
+be previewed, including files outside the working directory and symlink targets.
+Local references (including backtick-only names) are checked while rendering;
+only existing files become links. Relative paths use the session working directory;
+absolute paths, `../`, `~/`, and `file://` links are supported. Binary files are not previewed.
+External Markdown and text-file URLs are fetched on click and shown in the
+built-in preview. Ordinary web pages open directly. Remote reads time out after
+15 seconds and do not forward the launch token or browser cookies. File links refer to the machine running Pi.
