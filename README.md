@@ -145,3 +145,51 @@ node test/browser.mjs
 The browser check uses Chrome's DevTools protocol directly, without an additional testing dependency. It defaults to the macOS Google Chrome path; set `CHROME_PATH` elsewhere. It saves screenshots/results under [output](output) and retains its disposable browser profile under `temp/`.
 
 Each assistant response has an overlapping-rectangles copy icon (hover for **Copy response**) that copies its original text, preserving Markdown syntax for pasting into a `.md` file. During streaming it copies the text received so far. Copying shows a toast. **Expand tool details** sits to the right of the activity indicator above the prompt; Alt+O still works without an inline shortcut hint.
+
+Response links open in a new tab. Explicit Markdown links, bare HTTP(S) URLs,
+file paths, and filenames in inline code are clickable. Relative files resolve
+against the session working directory. Use `[label](<path with spaces.md>)` for
+paths containing spaces.
+
+Local `.md` and `.markdown` files open in the built-in Markdown preview with a
+source toggle; no browser extension is required. The lightweight renderer supports
+headings, paragraphs, lists, bold, inline code, fenced code, and links. Raw HTML
+is displayed as text. Other text files open as source. Preview reads require the
+launch token and are limited to 2 MiB. Any file readable by the Pi process can
+be previewed, including files outside the working directory and symlink targets.
+Local references (including backtick-only names) are checked while rendering;
+only existing files become links. Relative paths use the session working directory;
+absolute paths, `../`, `~/`, and `file://` links are supported. Images and videos open in the browser’s native viewer, with no app toolbar or
+coloring options. Videos use native playback controls and support byte-range
+seeking. The 2 MiB text limit does not apply to media. Other binary formats are
+not previewed.
+External Markdown and text-file URLs are fetched on click and shown in the
+built-in preview. Ordinary web pages open directly. Remote reads time out after
+15 seconds and do not forward the launch token or browser cookies. File links refer to the machine running Pi.
+
+Math in Markdown previews and responses is rendered locally with bundled KaTeX
+as accessible MathML. Inline `$...$` and `\(...\)`, display `$$...$$`, and
+multiline `\[...\]` support fractions, subscripts, superscripts, vectors, and
+aligned equations. Code spans and fenced code stay literal; invalid equations
+fall back to their source. The source toggle always shows the original file.
+No browser extension or CDN connection is required.
+
+Source previews default to **Nesting levels** coloring. The **Coloring** selector
+switches to **Standard syntax** (bundled Highlight.js 11.12.0, common languages)
+and remembers the choice in this browser. No extension or CDN is needed.
+
+- Python: indentation levels plus nested parentheses, lists, and dictionaries.
+- JSON: root keys use level 0, values level 1, nested keys level 2, their values
+  level 3, and so on. Array items add a level too.
+- YAML: indentation and bracket nesting.
+- Other recognized languages: structural bracket nesting, including JavaScript,
+  TypeScript, C/C++, Java, Go, Rust, and CSS. This is a lightweight lexical view,
+  not a full language parser; template interpolation and language-specific block
+  keywords are not independently colored. Standard syntax mode is available for
+  the language's conventional token coloring. Unrecognized extensions stay plain.
+
+The named palette repeats **blue → orange → green → pink → purple**, with
+separate light/dark shades that follow the browser's appearance setting. All
+nesting shades meet 4.5:1 contrast against the UI and code backgrounds. Hovering
+a colored section shows its actual level and color, including levels beyond the
+five-color cycle. Both modes preserve the exact source text and indentation.

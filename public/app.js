@@ -1,3 +1,4 @@
+import { prose as renderProse } from './prose.js';
 import { usageOf, transcriptOf } from './view.js';
 
 const $ = id => document.getElementById(id);
@@ -39,45 +40,7 @@ function showToast(message) {
     setTimeout(() => toast.remove(), 180);
   }, 3000);
 }
-// Markdown is rendered using DOM text nodes only; model/tool HTML is never executed.
-function inline(parent, text) {
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
-  let end = 0;
-  for (const match of text.matchAll(pattern)) {
-    parent.append(document.createTextNode(text.slice(end, match.index)));
-    const part = match[0];
-    if (part.startsWith('`')) parent.append(el('code', part.slice(1, -1)));
-    else if (part.startsWith('**')) parent.append(el('strong', part.slice(2, -2)));
-    else {
-      const split = part.indexOf('](');
-      const a = el('a', part.slice(1, split));
-      a.href = part.slice(split + 2, -1); a.target = '_blank'; a.rel = 'noopener noreferrer'; parent.append(a);
-    }
-    end = match.index + part.length;
-  }
-  parent.append(document.createTextNode(text.slice(end)));
-}
-function prose(text) {
-  const node = el('div', undefined, 'prose');
-  let code, paragraph;
-  for (const line of String(text || '').split('\n')) {
-    if (/^\s*```/.test(line)) {
-      if (code) code = undefined;
-      else { code = el('pre'); node.append(code); }
-      paragraph = undefined; continue;
-    }
-    if (code) { code.append(document.createTextNode(`${line}\n`)); continue; }
-    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
-    if (heading) { const h = el(`h${Math.min(4, heading[1].length + 1)}`); inline(h, heading[2]); node.append(h); paragraph = undefined; }
-    else if (!line) paragraph = undefined;
-    else {
-      if (!paragraph) { paragraph = el('p'); node.append(paragraph); }
-      else paragraph.append(document.createTextNode('\n'));
-      inline(paragraph, line);
-    }
-  }
-  return node;
-}
+function prose(text) { return renderProse(text, { token, cwd: view?.session.cwd }); }
 function detail(key, title, contents, className) {
   const node = el('details', undefined, className);
   node.open = opened.get(key) ?? expanded;

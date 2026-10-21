@@ -165,3 +165,9 @@
 .copy-icon::before,.copy-icon::after{content:"";position:absolute;width:12px;height:13px;border:1.5px solid currentColor;border-radius:3px}
 .copy-icon::before{left:1px;top:1px}
 .copy-icon::after{left:5px;top:5px;background:var(--bg)}
+
+/* MathML formulas stay readable without forcing horizontal page overflow. */
+.equation { font-size: 1.1em; }
+.equation-display { overflow-x: auto; padding: 12px 0; margin: 12px 0; }
+.equation-display math { margin: 0 auto; }
+.equation-error { font-family: monospace; white-space: pre-wrap; }

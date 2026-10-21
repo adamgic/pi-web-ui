@@ -1,0 +1,38 @@
+:root {
+  --nest-blue: #1756a9; --nest-orange: #a04400; --nest-green: #087344;
+  --nest-pink: #aa2464; --nest-purple: #7141a6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --nest-blue: #80baff; --nest-orange: #ffb366; --nest-green: #70d6a0;
+    --nest-pink: #ff91bd; --nest-purple: #c4a0ff;
+  }
+}
+.nest-color-0 { color: var(--nest-blue); }
+.nest-color-1 { color: var(--nest-orange); }
+.nest-color-2 { color: var(--nest-green); }
+.nest-color-3 { color: var(--nest-pink); }
+.nest-color-4 { color: var(--nest-purple); }
+.file-preview .source-code {
+  white-space: pre; overflow: auto; overflow-wrap: normal; tab-size: 8;
+  background: var(--code-bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 10px; padding: 20px; line-height: 1.65; font-size: 13px;
+}
+.source-code code { color: inherit; background: none; padding: 0; font-size: inherit; }
+.source-code .hljs-keyword, .source-code .hljs-selector-tag, .source-code .hljs-literal { color: var(--nest-purple); }
+.source-code .hljs-string, .source-code .hljs-regexp, .source-code .hljs-addition { color: var(--nest-green); }
+.source-code .hljs-number, .source-code .hljs-symbol, .source-code .hljs-bullet { color: var(--nest-orange); }
+.source-code .hljs-title, .source-code .hljs-attr, .source-code .hljs-attribute, .source-code .hljs-name { color: var(--nest-blue); }
+.source-code .hljs-built_in, .source-code .hljs-variable, .source-code .hljs-deletion { color: var(--nest-pink); }
+.source-code .hljs-comment, .source-code .hljs-quote { color: var(--muted); font-style: italic; }
+.source-code .hljs-meta { color: var(--nest-orange); }
+.source-code .hljs-emphasis { font-style: italic; }
+.source-code .hljs-strong { font-weight: bold; }
+.highlight-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+.highlight-controls label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.highlight-controls select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 7px; }
+.highlight-controls select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.color-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+#highlight-note { font-size: 12px; color: var(--muted); width: 100%; }
+.file-preview { display: block; }
+.file-preview header { flex-wrap: wrap; }

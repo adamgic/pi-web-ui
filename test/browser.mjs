@@ -74,6 +74,26 @@ try {
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await cdp('Page.navigate', { url: server.url });
   await until(() => evaluate("document.getElementById('connection')?.textContent === 'Connected'"), 'UI connection');
+  const links = await evaluate(`(async () => {
+    const { prose } = await import('/prose.js');
+    const node = prose('[Notes](<docs/My Notes.md>) README.md:12 https://example.com \`src/app.js\`\\n<script>bad()</script>', { token: 'test', cwd: '/example/project', checkFiles: false });
+    return { links: [...node.querySelectorAll('a')].map(a => ({ href: a.getAttribute('href'), target: a.target, rel: a.rel })), scripts: node.querySelectorAll('script').length };
+  })()`);
+  const checked = await evaluate(`(async () => {
+    const { prose } = await import('/prose.js');
+    const node = prose(${JSON.stringify('`' + root + 'README.md` `missing-file.md`')}, { token: ${JSON.stringify(server.token)}, cwd: '/example/project' });
+    for (let i = 0; i < 100 && node.querySelector('[data-file-candidate]'); i++) await new Promise(r => setTimeout(r, 20));
+    return { count: node.querySelectorAll('a[href]').length, text: node.textContent, href: node.querySelector('a[href]')?.getAttribute('href') };
+  })()`);
+  assert.equal(checked.count, 1);
+  assert.match(checked.href, /README.md/);
+  assert.match(checked.text, /missing-file.md/);
+  assert.equal(links.links.length, 4);
+  assert.equal(links.scripts, 0);
+  assert.ok(links.links.every(a => a.target === '_blank' && a.rel.includes('noopener')));
+  assert.match(links.links[0].href, /My\+Notes.md/);
+  assert.match(links.links[1].href, /README.md%3A12/);
+  results.push({ test: 'Markdown links, bare paths, inline code paths, external URLs and safe DOM rendering', status: 'pass' });
   assert.equal(await evaluate('getComputedStyle(document.documentElement).colorScheme'), 'light');
   assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(248, 250, 249)');
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/desktop-empty.png`, Buffer.from(result.data, 'base64')));
@@ -293,6 +313,96 @@ try {
   await evaluate("document.getElementById('prompt').value = '/login'; document.getElementById('send').click()");
   await until(() => evaluate("document.getElementById('alerts').textContent.includes('terminal')"), 'terminal-only command guidance');
   assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2);
+  const mathFixture = await readFile(`${root}test/fixtures/tidal-forces.md`, 'utf8');
+  const expectedMath = [...mathFixture.matchAll(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g)].length;
+  await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/tidal-forces.md` })}#token=${server.token}` });
+  await until(() => evaluate("document.querySelectorAll('#content math').length > 0"), 'tidal equations');
+  assert.equal(await evaluate("document.querySelectorAll('#content math').length"), expectedMath);
+  assert.equal(await evaluate("document.querySelectorAll('.equation-error').length"), 0);
+  assert.ok(await evaluate("document.querySelectorAll('mfrac').length > 0 && document.querySelectorAll('mtable').length > 0"));
+  await evaluate('document.fonts.ready');
+  await evaluate("document.querySelector('.equation-display').scrollIntoView({ block: 'start' })");
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/tidal-equations.png`, Buffer.from(result.data, 'base64')));
+  await evaluate("document.getElementById('toggle').click()");
+  assert.equal(await evaluate("document.getElementById('content').textContent"), mathFixture);
+  await evaluate("document.getElementById('toggle').click()");
+  assert.equal(await evaluate("document.querySelectorAll('#content math').length"), expectedMath);
+  const edgeMath = await evaluate(`(async () => {
+    const { prose } = await import('/prose.js');
+    const node = prose(${JSON.stringify('Inline $x^2$ and ` $code$ `\n\n```tex\n$x$\n```\n\n$$\n\\notACommand{x}\n$$')}, { checkFiles: false });
+    return { math: node.querySelectorAll('math').length, errors: node.querySelectorAll('.equation-error').length, code: node.querySelector('pre').textContent };
+  })()`);
+  assert.equal(edgeMath.math, 1);
+  assert.equal(edgeMath.errors, 1);
+  assert.match(edgeMath.code, /\$x\$/);
+  results.push({ test: 'Tidal document equations, fractions, aligned groups, source toggle, code exclusions and invalid math fallback', status: 'pass', equations: expectedMath });
+  const openSource = async filename => {
+    await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/${filename}` })}#token=${server.token}` });
+    await until(() => evaluate("Boolean(document.querySelector('.source-code'))"), `source preview ${filename}`);
+    assert.equal(await evaluate("document.querySelector('.source-code').textContent"), await readFile(`${root}test/fixtures/${filename}`, 'utf8'));
+  };
+  await openSource('nesting.py');
+  assert.equal(await evaluate("document.getElementById('highlight-mode').value"), 'nesting');
+  assert.ok(await evaluate("new Set([...document.querySelectorAll('[data-depth]')].map(n => n.dataset.depth)).size >= 4"));
+  for (const theme of ['light', 'dark']) {
+    await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    const colors = await evaluate("[...document.querySelectorAll('#color-legend span')].map(n => getComputedStyle(n).color)");
+    assert.equal(new Set(colors).size, 5);
+    assert.equal(colors[0], theme === 'light' ? 'rgb(23, 86, 169)' : 'rgb(128, 186, 255)');
+    await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/python-nesting-${theme}.png`, Buffer.from(result.data, 'base64')));
+  }
+  await evaluate("document.getElementById('highlight-mode').value = 'standard'; document.getElementById('highlight-mode').dispatchEvent(new Event('change'))");
+  assert.ok(await evaluate("Boolean(document.querySelector('.hljs-keyword')) && !document.querySelector('[data-depth]')"));
+  assert.equal(await evaluate("document.querySelector('.source-code').textContent"), await readFile(`${root}test/fixtures/nesting.py`, 'utf8'));
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/python-standard-dark.png`, Buffer.from(result.data, 'base64')));
+  await openSource('nesting.json');
+  assert.equal(await evaluate("document.getElementById('highlight-mode').value"), 'standard');
+  assert.ok(await evaluate("Boolean(document.querySelector('.hljs-attr'))"));
+  await evaluate("document.getElementById('highlight-mode').value = 'nesting'; document.getElementById('highlight-mode').dispatchEvent(new Event('change'))");
+  const jsonDepths = await evaluate("[...document.querySelectorAll('[data-depth]')].map(n => ({ text: n.textContent, depth: Number(n.dataset.depth) }))");
+  assert.equal(jsonDepths.find(n => n.text.includes('\"project\"')).depth, 0);
+  assert.equal(jsonDepths.find(n => n.text.includes('\"settings\"')).depth, 2);
+  assert.equal(jsonDepths.find(n => n.text.includes('\"enabled\"')).depth, 4);
+  assert.equal(jsonDepths.find(n => n.text.includes('true')).depth, 5);
+  for (const theme of ['light', 'dark']) {
+    await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
+    await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/json-nesting-${theme}.png`, Buffer.from(result.data, 'base64')));
+  }
+  const safeCode = await evaluate(`(async () => {
+    const { highlightedCode } = await import('/highlighting.js');
+    const source = '<script>alert(1)</script>';
+    return ['standard', 'nesting'].map(mode => { const node = highlightedCode(source, 'xml', mode); return { text: node.textContent, scripts: node.querySelectorAll('script').length }; });
+  })()`);
+  assert.deepEqual(safeCode, [{ text: '<script>alert(1)</script>', scripts: 0 }, { text: '<script>alert(1)</script>', scripts: 0 }]);
+  results.push({ test: 'Python/JSON depth colors, standard Highlight.js, persistent toggle, exact source, light/dark palettes and safe markup', status: 'pass' });
+  // Produce a real PNG and WebM with browser-native encoders for decoding checks.
+  const mediaData = await evaluate(`(async () => {
+    const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90;
+    const ctx = canvas.getContext('2d'); ctx.fillStyle = '#80baff'; ctx.fillRect(0, 0, 160, 90);
+    const png = canvas.toDataURL('image/png').split(',')[1];
+    const stream = canvas.captureStream(10);
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+    const chunks = []; recorder.ondataavailable = event => chunks.push(event.data);
+    const stopped = new Promise(resolve => recorder.onstop = resolve);
+    recorder.start(); await new Promise(resolve => setTimeout(resolve, 300)); recorder.stop(); await stopped;
+    stream.getTracks().forEach(track => track.stop());
+    const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
+    return { png, video: btoa(String.fromCharCode(...bytes)) };
+  })()`);
+  await writeFile(`${out}/native-image.png`, Buffer.from(mediaData.png, 'base64'));
+  await writeFile(`${out}/native-video.webm`, Buffer.from(mediaData.video, 'base64'));
+  for (const [name, selector] of [['native-image.png', 'img'], ['native-video.webm', 'video']]) {
+    await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${out}/${name}` })}#token=${server.token}` });
+    await until(() => evaluate(`location.pathname.startsWith('/media/') && Boolean(document.querySelector('${selector}'))`), `native ${selector} viewer`);
+    try {
+      await until(() => evaluate(selector === 'img' ? "document.querySelector('img').naturalWidth === 160" : "document.querySelector('video').readyState >= 1"), `native ${selector} decoding`);
+    } catch (error) {
+      throw new Error(`${error.message}: ${JSON.stringify(await evaluate("({ html: document.body.innerHTML, error: document.querySelector('video')?.error?.message })"))}`);
+    }
+    assert.equal(await evaluate("Boolean(document.querySelector('#highlight-controls, #toggle, .file-preview'))"), false);
+    if (selector === 'video') assert.ok(await evaluate("document.querySelector('video').controls"));
+  }
+  results.push({ test: 'Native image and video documents decode correctly with no app preview controls', status: 'pass' });
   assert.deepEqual(exceptions, []);
   results.push({ test: 'browser controls, safe rendering, streaming, reload without replay', status: 'pass' });
   results.push({ test: 'Arrow Up recall, draft preservation, recall after reload, thinking animation, idle reset and reduced motion', status: 'pass' });

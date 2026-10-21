@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startServer } from '../src/server.mjs';
+import { linkTarget } from '../public/prose.js';
+
+test('media uses scoped native URLs, correct types and video byte ranges without text limits', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'pi-media-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const video = Buffer.alloc(3 * 1024 * 1024, 42);
+  await writeFile(join(dir, 'movie.mp4'), video);
+  await writeFile(join(dir, 'image.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const server = await startServer({ subscribe: () => () => {}, current: () => ({ session: { cwd: dir } }) });
+  t.after(() => server.close());
+  const metadata = path => fetch(`${server.origin}/api/file?${new URLSearchParams({ path })}`, { headers: { Authorization: `Bearer ${server.token}` } });
+  assert.equal((await fetch(`${server.origin}/api/file?path=movie.mp4`)).status, 401);
+  const info = await (await metadata('movie.mp4')).json();
+  assert.equal(info.type, 'video/mp4');
+  assert.ok(info.mediaUrl && !info.mediaUrl.includes(server.token));
+  assert.equal((await fetch(`${server.origin}/media/unknown`)).status, 404);
+  const url = server.origin + info.mediaUrl;
+  const head = await fetch(url, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get('content-length'), String(video.length));
+  assert.equal(head.headers.get('content-type'), 'video/mp4');
+  assert.equal(head.headers.get('accept-ranges'), 'bytes');
+  const partial = await fetch(url, { headers: { Range: 'bytes=10-19' } });
+  assert.equal(partial.status, 206);
+  assert.equal(partial.headers.get('content-range'), `bytes 10-19/${video.length}`);
+  assert.deepEqual(Buffer.from(await partial.arrayBuffer()), video.subarray(10, 20));
+  const suffix = await fetch(url, { headers: { Range: 'bytes=-5' } });
+  assert.equal(suffix.status, 206);
+  assert.equal((await suffix.arrayBuffer()).byteLength, 5);
+  for (const range of ['bytes=999999999-', 'bytes=20-10', 'bytes=-0', 'bytes=0-1,3-4']) {
+    assert.equal((await fetch(url, { headers: { Range: range } })).status, 416);
+  }
+  const full = await fetch(url);
+  assert.deepEqual(Buffer.from(await full.arrayBuffer()), video);
+  const image = await (await metadata('image.svg')).json();
+  const response = await fetch(server.origin + image.mediaUrl);
+  assert.equal(response.headers.get('content-type'), 'image/svg+xml');
+  assert.match(response.headers.get('content-security-policy'), /sandbox/);
+  assert.match(response.headers.get('content-security-policy'), /default-src 'none'/);
+  assert.equal(response.headers.get('content-disposition'), 'inline');
+  await response.text();
+  assert.equal(linkTarget('https://example.com/image.png'), 'https://example.com/image.png');
+  assert.equal(linkTarget('https://example.com/movie.webm'), 'https://example.com/movie.webm');
+});
