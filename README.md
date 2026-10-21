@@ -77,11 +77,11 @@ Browser controls:
 | Alt+O | Expand or collapse tool and reasoning details. |
 | `/help` | Show browser shortcuts. |
 | Sessions | Open a searchable list of saved sessions for the current working directory. |
-| New session (sidebar or Sessions) | Start a fresh Pi session and switch both the terminal and browser to it. |
+| New session (inside Sessions) | Start a fresh Pi session and switch both the terminal and browser to it. |
 
 The browser displays the active session branch, streaming responses and reasoning, tool arguments/results, compaction summaries, model selection, token/cost estimates, and available tools. Queued work is indicated; the public extension API does not expose the full queue text. Pending messages appear in the transcript when Pi consumes them.
 
-The sidebar shows the full working directory (with the home prefix shortened to `~`), session name or first prompt, creation time, current-branch message count, provider/model, and session-file path. Hover over or focus the session ID to reveal it in full; click to copy. Model usage includes input/output tokens, cache reads/writes, context usage and capacity, and estimated cost. The sidebar scrolls independently in short windows; the saved-session list also has its own scroll area. It refreshes on session/activity changes, with a manual refresh button for sessions saved elsewhere. Ready, disconnected, and animated thinking status share the same text size above the prompt.
+The sidebar shows the full working directory (with the home prefix shortened to `~`), session name or first prompt, creation time, current-branch message count, provider/model, and session-file path. Hover over or focus the session ID to reveal it in full; click to copy. Model usage includes input/output tokens, cache reads/writes, context usage and capacity, and estimated cost. The sidebar scrolls independently in short windows. Ready, disconnected, and animated thinking status share the same text size above the prompt.
 
 Prompt history comes from the active session and includes prompts accepted from this tab that are still queued. Switching history items preserves the cursor's character column, clamped to the destination line's length. Up enters the last line; Down enters the first line. While browsing, edits to recalled prompts are kept for that navigation pass; returning to your draft restores the original unsent text and saved cursor position. History is held steady during navigation so streaming updates do not move your position. Modified arrow keys retain their normal text-editing behavior.
 
@@ -93,7 +93,7 @@ The footer shows an animated gradient through “Thinking…” while Pi is work
 
 Run `/login` **in the Pi terminal** to authenticate your provider, then open the browser model picker. It refreshes the available models from Pi. Provider credentials remain managed by Pi; the extension does not implement a second login flow or send credentials to browser JavaScript.
 
-Use the searchable **Sessions** list and **New session** button in the sidebar to switch sessions or create one. The top-bar **Sessions** picker also works on narrow screens. These actions are available while Pi is idle with no queued messages or compaction. The picker shows session names (or the first prompt), message counts, and modification times. It respects the current session directory, and only lists sessions for the current working directory. Pi's session-change hooks can cancel an operation. A blank session may not appear in the saved list until Pi persists it after a conversation.
+Use the **Sessions** picker in the top bar to search saved sessions, switch sessions, or create a **New session**. The list refreshes each time the picker opens. These actions are available while Pi is idle with no queued messages or compaction. The picker shows session names (or the first prompt), message counts, and modification times. It respects the current session directory, and only lists sessions for the current working directory. Pi's session-change hooks can cancel an operation. A blank session may not appear in the saved list until Pi persists it after a conversation.
 
 Use the terminal for `/tree`, `/reload`, custom extension commands, permission dialogs, and other terminal UI interactions. Terminal `/resume` and `/new` remain available too. The browser provides its own small command set; use the session buttons instead of typing those slash commands in the browser. Unknown slash commands receive guidance and are never forwarded as model prompts, including through the follow-up button.
 

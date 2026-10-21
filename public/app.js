@@ -9,7 +9,7 @@ let localError = '', selectedConversation, submitting = false;
 const drafts = new Map();
 const submittedPrompts = new Map();
 let historyNavigation;
-let sessions = [], sessionsRequest = 0, sessionsKey = "";
+let sessions = [], sessionsRequest = 0;
 const opened = new Map();
 const transcript = $('transcript');
 const welcome = transcript.firstElementChild;
@@ -99,8 +99,6 @@ function renderTranscript() {
   transcript.scrollTop = following ? transcript.scrollHeight : scroll;
 }
 function renderNavigation() {
-  const key = JSON.stringify([view.session.id, view.session.name, view.entries.length, view.busy]);
-  if (key !== sessionsKey && !view.busy && !view.switching) { sessionsKey = key; void refreshSessions(); }
   $('tasks').replaceChildren(...view.activeTools.map(name => el('div', name, 'task')));
 }
 function controls() {
@@ -114,8 +112,7 @@ function controls() {
     const changingDisabled = !online || pending || view.busy || view.compacting || view.pendingMessages || view.switching;
     $('sessions').disabled = changingDisabled;
     $('new-session').disabled = changingDisabled;
-    $('sidebar-new-session').disabled = changingDisabled;
-    document.querySelectorAll('#session-list button, #conversations button').forEach(button => { button.disabled = changingDisabled || button.dataset.current === 'true'; });
+    document.querySelectorAll('#session-list button').forEach(button => { button.disabled = changingDisabled || button.dataset.current === 'true'; });
     if (view.switching) document.querySelectorAll('[data-control]').forEach(button => { button.disabled = true; });
   }
   const working = online && Boolean(submitting || view?.busy || view?.compacting);
@@ -207,16 +204,14 @@ async function refreshSessions() {
     if (!response.ok) throw new Error(result.error || 'Unable to load sessions.');
     if (result.sessionId !== id) return;
     sessions = result.sessions;
-    $('sidebar-session-error').hidden = true;
     filterSessions();
   } catch (error) {
     if (request !== sessionsRequest || id !== selectedConversation) return;
-    $('sidebar-session-error').textContent = error.message;
-    $('sidebar-session-error').hidden = false;
     if ($('session-dialog').open) { localError = error.message; alerts(); }
   }
 }
 async function showSessions() {
+  localError = ''; alerts();
   $('session-search').value = '';
   filterSessions();
   $('session-dialog').showModal();
@@ -224,21 +219,19 @@ async function showSessions() {
   await refreshSessions();
 }
 function filterSessions() {
-  for (const [listId, searchId] of [['session-list', 'session-search'], ['conversations', 'sidebar-session-search']]) {
-    const query = $(searchId).value.toLowerCase();
-    const list = $(listId);
-    list.replaceChildren();
-    for (const session of sessions.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query))) {
-      const current = session.id === selectedConversation;
-      const button = el('button', session.name, current ? 'selected active' : '');
-      button.dataset.current = String(current);
-      if (current) button.setAttribute('aria-current', 'true');
-      button.append(el('small', `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}`));
-      button.onclick = async () => { if (await run('switch-session', { path: session.path })) $('session-dialog').close(); };
-      list.append(button);
-    }
-    if (!list.children.length) list.append(el('p', 'No saved sessions match. New sessions appear after Pi saves them.', 'muted'));
+  const query = $('session-search').value.toLowerCase();
+  const list = $('session-list');
+  list.replaceChildren();
+  for (const session of sessions.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query))) {
+    const current = session.id === selectedConversation;
+    const button = el('button', session.name, current ? 'selected active' : '');
+    button.dataset.current = String(current);
+    if (current) button.setAttribute('aria-current', 'true');
+    button.append(el('small', `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}`));
+    button.onclick = async () => { if (await run('switch-session', { path: session.path })) $('session-dialog').close(); };
+    list.append(button);
   }
+  if (!list.children.length) list.append(el('p', 'No saved sessions match. New sessions appear after Pi saves them.', 'muted'));
   controls();
 }
 function filterModels() {
@@ -282,9 +275,6 @@ $('abort').onclick = () => run('abort');
 $('model').onclick = showModels;
 $('sessions').onclick = showSessions;
 $('session-search').oninput = filterSessions;
-$('sidebar-session-search').oninput = filterSessions;
-$('refresh-sessions').onclick = refreshSessions;
-$('sidebar-new-session').onclick = () => run('new-session');
 $('session-id').onclick = async () => {
   try { await navigator.clipboard.writeText(view.session.id); $('copy-status').textContent = 'Session ID copied'; }
   catch { $('copy-status').textContent = 'Copy unavailable. Select the ID shown on hover to copy.'; }

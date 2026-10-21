@@ -254,13 +254,7 @@ try {
   assert.equal(await input(), 'Original session draft');
   assert.equal(await evaluate("document.querySelectorAll('#transcript .message.user').length"), 2);
   results.push({ test: 'New session, saved session picker, unchanged connection, restored history and per-session drafts', status: 'pass' });
-  await until(() => evaluate("document.querySelector('#conversations button:not(:disabled)') !== null"), 'sidebar session list');
-  await evaluate("document.querySelector('#conversations button:not(:disabled)').click()");
-  await until(() => evaluate("document.getElementById('session-id').textContent.includes('new-browser-session')"), 'sidebar session switch');
-  assert.equal(await input(), 'New session draft');
-  await evaluate("document.getElementById('sidebar-new-session').click()");
-  await until(() => evaluate("document.getElementById('sidebar-new-session').disabled === false"), 'sidebar new session');
-  results.push({ test: 'Full directory path, sidebar usage, short-window scrolling, status position and size, ID tooltip and clipboard, sidebar session controls', status: 'pass' });
+  results.push({ test: 'Full directory path, sidebar usage, short-window scrolling, status position and size, ID tooltip and clipboard', status: 'pass' });
   await evaluate("document.getElementById('prompt').value = '/login'; document.getElementById('send').click()");
   await until(() => evaluate("document.getElementById('alerts').textContent.includes('terminal')"), 'terminal-only command guidance');
   assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2);
