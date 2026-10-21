@@ -104,10 +104,10 @@
 .session-meta{padding:20px 18px}
 .session-meta strong{white-space:normal;overflow-wrap:anywhere;line-height:1.5}
 #cwd{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;margin-bottom:20px}
-.session-id-wrap{position:relative}
+.detail-copy-wrap{position:relative}
 #session-id{width:100%;text-align:left;padding:6px 0;cursor:copy}
-#session-id-tooltip{display:none;position:absolute;z-index:2;top:100%;left:0;right:0;padding:10px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;box-shadow:0 4px 15px var(--dialog-shadow);font:12px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;user-select:all}
-.session-id-wrap:hover #session-id-tooltip,.session-id-wrap:focus-within #session-id-tooltip{display:block}
+.detail-tooltip{display:none;position:absolute;z-index:2;top:100%;left:0;right:0;padding:10px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;box-shadow:0 4px 15px var(--dialog-shadow);font:12px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;user-select:all}
+.detail-copy-wrap:hover .detail-tooltip,.detail-copy-wrap:focus-within .detail-tooltip{display:block}
 #copy-status{font-size:11px}
 .metadata{margin:12px 0 0;font-size:12px;line-height:1.5;display:grid;grid-template-columns:minmax(0,1fr);gap:3px}
 .metadata dt{color:var(--muted);font-size:11px;margin-top:6px}
@@ -135,3 +135,11 @@
   .composer textarea{min-height:50px;padding:8px 17px;height:65px}
 }
 .sidebar{position:relative}
+
+#session-details-panel>summary{display:list-item;padding:7px 0;font-size:12px;color:var(--text);list-style-type:disclosure-closed}
+#session-details-panel[open]>summary{list-style-type:disclosure-open}
+#session-details-panel .metadata{margin-top:3px;margin-bottom:14px}
+.detail-copy{display:block;width:100%;text-align:left;padding:5px 0;cursor:copy;white-space:normal;overflow-wrap:anywhere;font-size:12px}
+.model-label{margin-top:14px}
+#session-model{display:block;margin-top:7px;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+#copy-status{display:block;margin-top:7px}

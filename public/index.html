@@ -6,9 +6,8 @@
   <header class="topbar"><div class="brand"><span class="mark">π</span><div><strong>Pi workspace</strong><span class="eyebrow">PI SESSION</span></div></div><div class="connection"><span id="connection-dot" class="dot"></span><span id="connection">Connecting…</span></div><button id="sessions" class="quiet" data-control>Sessions</button><button id="help" class="quiet" title="Keyboard shortcuts">? <span>Help</span></button></header>
   <div class="workspace">
     <aside class="sidebar" aria-label="Session information">
-      <section class="session-meta"><span class="eyebrow">WORKING DIRECTORY</span><strong id="cwd">Connecting to Pi…</strong><span class="eyebrow">SESSION</span><strong id="session-name">New session</strong><div class="session-id-wrap"><button id="session-id" class="quiet mono" aria-describedby="session-id-tooltip" aria-label="Copy session ID">Connecting…</button><span id="session-id-tooltip" role="tooltip"></span></div><span id="copy-status" class="muted" role="status"></span></section>
+      <section class="session-meta"><span class="eyebrow">WORKING DIRECTORY</span><strong id="cwd">Connecting to Pi…</strong><span class="eyebrow">SESSION</span><strong id="session-name">New session</strong><details id="session-details-panel"><summary>Session details</summary><dl id="session-details" class="metadata"></dl></details><span class="eyebrow model-label">MODEL</span><span id="session-model">None selected</span><span id="copy-status" class="muted" role="status"></span></section>
       <section class="usage-section"><h2>Model usage</h2><dl id="usage" class="metadata"></dl><p class="muted usage-note">Current branch totals. Cost is reported or estimated, not an invoice.</p></section>
-      <section class="usage-section"><h2>Session details</h2><dl id="session-details" class="metadata"></dl></section>
       <section class="task-section"><div class="section-title"><h2>Available tools</h2></div><div id="tasks" class="task-list"><p class="muted">Loading session tools.</p></div></section>
       <div class="sidebar-foot"><span class="dot saved"></span> Shared with the Pi terminal</div>
     </aside>

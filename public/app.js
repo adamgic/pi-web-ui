@@ -138,17 +138,17 @@ function render() {
 
   $('cwd').textContent = view.session.displayCwd || view.session.cwd;
   $('cwd').title = view.session.cwd;
-  $('session-id').textContent = `SESSION ${view.session.id}`;
-  $('session-id-tooltip').textContent = view.session.id;
+  $('session-model').textContent = view.model?.modelId || 'None selected';
   $('session-name').textContent = view.session.name;
   const messages = transcriptOf(view).filter(item => ['user', 'assistant'].includes(item.type));
   renderMetadata($('session-details'), [
+    ['Session ID', view.session.id],
     ['Created', view.session.created ? new Date(view.session.created).toLocaleString() : 'Unknown'],
     ['Branch messages', messages.length],
     ['Provider', view.model?.provider || 'None selected'],
     ['Model', view.model?.modelId || 'None selected'],
     ['Session file', view.session.file || 'In memory'],
-  ]);
+  ], true);
   $('conversation-title').textContent = view.session.name;
   $('model').textContent = view.model?.modelId || 'Select model';
   $('model').title = view.model ? `${view.model.provider}/${view.model.modelId}` : 'Choose a model';
@@ -191,8 +191,31 @@ async function showModels() {
     $('model-search').value = ''; filterModels(); $('model-dialog').showModal(); $('model-search').focus();
   } catch (error) { localError = error.message; alerts(); }
 }
-function renderMetadata(node, rows) {
-  node.replaceChildren(...rows.flatMap(([label, value]) => [el('dt', label), el('dd', value)]));
+function renderMetadata(node, rows, copyable = false) {
+  const signature = JSON.stringify(rows);
+  if (node.dataset.values === signature) return;
+  node.dataset.values = signature;
+  node.replaceChildren(...rows.flatMap(([label, value], index) => {
+    const definition = el('dd');
+    if (!copyable) definition.textContent = value;
+    else {
+      const button = el('button', label === 'Session ID' ? `SESSION ${value}` : value, 'quiet detail-copy');
+      const tooltip = el('span', value, 'detail-tooltip');
+      tooltip.id = label === 'Session ID' ? 'session-id-tooltip' : `session-detail-tooltip-${index}`;
+      tooltip.setAttribute('role', 'tooltip');
+      button.setAttribute('aria-label', `Copy ${label}`);
+      button.setAttribute('aria-describedby', tooltip.id);
+      button.title = `Copy ${label}`;
+      if (label === 'Session ID') { button.id = 'session-id'; button.classList.add('mono'); }
+      button.onclick = async () => {
+        try { await navigator.clipboard.writeText(String(value)); $('copy-status').textContent = `${label} copied`; }
+        catch { $('copy-status').textContent = 'Copy unavailable. Select the value shown on hover to copy.'; }
+      };
+      definition.className = 'detail-copy-wrap';
+      definition.append(button, tooltip);
+    }
+    return [el('dt', label), definition];
+  }));
 }
 async function refreshSessions() {
   const request = ++sessionsRequest;
@@ -275,10 +298,6 @@ $('abort').onclick = () => run('abort');
 $('model').onclick = showModels;
 $('sessions').onclick = showSessions;
 $('session-search').oninput = filterSessions;
-$('session-id').onclick = async () => {
-  try { await navigator.clipboard.writeText(view.session.id); $('copy-status').textContent = 'Session ID copied'; }
-  catch { $('copy-status').textContent = 'Copy unavailable. Select the ID shown on hover to copy.'; }
-};
 $('new-session').onclick = async () => { if (await run('new-session')) $('session-dialog').close(); };
 $('thinking').onclick = () => run('thinking');
 $('compact').onclick = () => $('compact-dialog').showModal();

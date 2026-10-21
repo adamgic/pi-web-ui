@@ -90,6 +90,10 @@ try {
   assert.ok(await evaluate("document.querySelector('.sidebar').scrollHeight > document.querySelector('.sidebar').clientHeight"));
   assert.ok(await evaluate("document.getElementById('status').getBoundingClientRect().bottom <= document.getElementById('prompt').getBoundingClientRect().top"));
   assert.ok(await evaluate("document.querySelector('.sidebar').contains(document.getElementById('usage'))"));
+  assert.equal(await evaluate("document.getElementById('session-details-panel').open"), false);
+  assert.ok(await evaluate("document.getElementById('session-model').checkVisibility()"));
+  await evaluate("document.querySelector('#session-details-panel summary').click()");
+  assert.equal(await evaluate("document.getElementById('session-details-panel').open"), true);
   await evaluate("document.getElementById('session-id').focus()");
   assert.equal(await evaluate("getComputedStyle(document.getElementById('session-id-tooltip')).display"), 'block');
   assert.equal(await evaluate("document.getElementById('session-id-tooltip').textContent"), f.state.id);
@@ -98,6 +102,14 @@ try {
   await evaluate("document.getElementById('session-id').click()");
   await until(() => evaluate("document.getElementById('copy-status').textContent === 'Session ID copied'"), 'copy session ID');
   assert.equal(await evaluate('navigator.clipboard.readText()'), f.state.id);
+  const detailValues = await evaluate("[...document.querySelectorAll('#session-details .detail-copy')].map(b => ({label:b.getAttribute('aria-label'), value:b.nextElementSibling.textContent}))");
+  for (let index = 0; index < detailValues.length; index++) {
+    await evaluate(`document.querySelectorAll('#session-details .detail-copy')[${index}].click()`);
+    await until(async () => (await evaluate('navigator.clipboard.readText()')) === detailValues[index].value, detailValues[index].label);
+  }
+  await evaluate("document.querySelector('#session-details-panel summary').click()");
+  assert.equal(await evaluate("document.getElementById('session-details-panel').open"), false);
+  assert.ok(await evaluate("document.getElementById('session-model').checkVisibility()"));
   await viewport(390, 500); await pause(150);
   const tiny = await evaluate('({width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight})');
   assert.ok(tiny.scrollHeight > tiny.height); assert.ok(tiny.scrollWidth <= tiny.width); results.push({ test: 'tiny viewport vertical fallback', ...tiny });
