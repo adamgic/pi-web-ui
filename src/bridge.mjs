@@ -1,10 +1,12 @@
+import { homedir } from 'node:os';
+import { sep } from 'node:path';
 import { textContent } from '../public/view.js';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const copy = value => structuredClone(value);
 
 /** Adapts the public ExtensionAPI and ExtensionContext to browser snapshots. */
-export function createBridge(pi) {
+export function createBridge(pi, { listSessions: discoverSessions = async () => [], changeSession } = {}) {
   let ctx;
   let streaming;
   let completed = [];
@@ -52,8 +54,11 @@ export function createBridge(pi) {
       (entry.type === 'message' && JSON.stringify(entry.message) === JSON.stringify(message)) ||
       (entry.type === 'custom_message' && message.role === 'custom' && entry.customType === message.customType && JSON.stringify(entry.content) === JSON.stringify(message.content))));
     const models = ctx.modelRegistry.getAvailable().map(model => ({ provider: model.provider, modelId: model.id, name: model.name, contextWindow: model.contextWindow }));
+    const home = homedir();
+    const displayCwd = ctx.cwd === home ? '~' : ctx.cwd.startsWith(home + sep) ? '~' + ctx.cwd.slice(home.length) : ctx.cwd;
+    const firstPrompt = entries.find(entry => entry.type === 'message' && entry.message.role === 'user')?.message;
     return {
-      session: { id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, file: ctx.sessionManager.getSessionFile(), name: pi.getSessionName() || 'Current session' },
+      session: { displayCwd, created: ctx.sessionManager.getHeader()?.timestamp, id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, file: ctx.sessionManager.getSessionFile(), name: pi.getSessionName() || textContent(firstPrompt?.content).trim().slice(0, 160) || 'New session' },
       entries, completed, streaming, tools: [...tools.values()], models,
       model: ctx.model ? { provider: ctx.model.provider, modelId: ctx.model.id } : undefined,
       thinkingLevel: pi.getThinkingLevel(), busy: !ctx.isIdle(), compacting,
@@ -62,10 +67,35 @@ export function createBridge(pi) {
     };
   }
 
+  async function listSessions() {
+    if (!ctx || closed) throw fail(503, 'No active Pi session.');
+    const id = ctx.sessionManager.getSessionId();
+    const sessions = await discoverSessions(ctx.cwd, ctx.sessionManager.getSessionDir());
+    if (closed || id !== ctx.sessionManager.getSessionId()) throw fail(409, 'The active session changed.');
+    return { sessionId: id, sessions: sessions.map(item => ({
+      id: item.id, path: item.path, name: (item.name || item.firstMessage || 'Untitled session').slice(0, 160),
+      modified: item.modified, messageCount: item.messageCount,
+    })) };
+  }
+
   async function execute(command) {
     if (closed || !ctx) throw fail(503, 'No active Pi session.');
     if (command.sessionId !== ctx.sessionManager.getSessionId()) throw fail(409, 'The active session changed. Review it before retrying.');
     switch (command.action) {
+      case 'new-session':
+      case 'switch-session': {
+        if (!changeSession) throw fail(503, 'Session controls are unavailable.');
+        if (!ctx.isIdle() || compacting || ctx.hasPendingMessages()) throw fail(409, 'Wait until Pi is idle before changing sessions.');
+        let path;
+        if (command.action === 'switch-session') {
+          const { sessions } = await listSessions();
+          path = sessions.find(session => session.path === command.path)?.path;
+          if (!path) throw fail(400, 'Session unavailable in this working directory.');
+        }
+        // Context may have changed during discovery. Never act on a stale browser request.
+        if (command.sessionId !== ctx.sessionManager.getSessionId() || !ctx.isIdle() || ctx.hasPendingMessages() || compacting) throw fail(409, 'Session state changed. Try again when idle.');
+        return changeSession({ action: command.action, path, sessionId: command.sessionId });
+      }
       case 'submit': {
         if (typeof command.text !== 'string' || !command.text.trim()) throw fail(400, 'Enter a message.');
         if (!['steer', 'followUp'].includes(command.whenBusy)) throw fail(400, 'Invalid queue mode.');
@@ -108,7 +138,7 @@ export function createBridge(pi) {
     publish();
     return { accepted: true };
   }
-  return { update, current, execute, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+  return { update, current, execute, listSessions, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     close() { closed = true; listeners.clear(); streaming = undefined; completed = []; tools.clear(); },
   };
 }

@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBridge } from '../src/bridge.mjs';
@@ -78,4 +80,23 @@ test('public controls validate stale sessions, slash commands and compaction sta
   assert.equal(bridge.current().notices[0].message, 'Cannot compact');
   bridge.close();
   await assert.rejects(run('abort'), { status: 503 });
+});
+
+
+test('session metadata uses readable names and only abbreviates the actual home directory', () => {
+  const { pi, ctx, state } = fixture();
+  pi.getSessionName = () => undefined;
+  const bridge = createBridge(pi);
+  ctx.cwd = join(homedir(), 'workspace', 'harness');
+  state.entries.push({ type: 'message', id: 'first', message: { role: 'user', content: 'Explain this project' } });
+  bridge.update({ type: 'session_start' }, ctx);
+  assert.equal(bridge.current().session.displayCwd, '~/workspace/harness');
+  assert.equal(bridge.current().session.name, 'Explain this project');
+  assert.equal(bridge.current().session.created, '2026-10-21T10:00:00Z');
+  ctx.cwd = homedir();
+  assert.equal(bridge.current().session.displayCwd, '~');
+  ctx.cwd = homedir() + '-other/project';
+  assert.equal(bridge.current().session.displayCwd, ctx.cwd);
+  pi.getSessionName = () => 'Named session';
+  assert.equal(bridge.current().session.name, 'Named session');
 });

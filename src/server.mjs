@@ -77,6 +77,9 @@ export async function startServer(bridge, { port = 0 } = {}) {
       const url = new URL(req.url, origin);
       if (url.pathname.startsWith('/api/')) {
         if (!authorized(req)) throw error(401, 'Open the full launch URL printed in the terminal.');
+        if (req.method === 'GET' && url.pathname === '/api/sessions') {
+          json(res, 200, await bridge.listSessions()); return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/state') {
           json(res, 200, bridge.current()); return;
         }

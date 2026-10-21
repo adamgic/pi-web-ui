@@ -13,7 +13,19 @@ const profile = `${root}temp/pi-extension-chrome-${Date.now()}`;
 await mkdir(out, { recursive: true });
 await mkdir(profile, { recursive: true });
 const f = fixture();
-const bridge = createBridge(f.pi);
+const saved = new Map();
+const bridge = createBridge(f.pi, {
+  listSessions: async () => [...saved].map(([id, entries]) => ({
+    id, path: `/example/${id}.jsonl`, name: id, messageCount: entries.length, modified: new Date(),
+  })),
+  changeSession: async command => {
+    saved.set(f.state.id, structuredClone(f.state.entries));
+    f.state.id = command.action === 'new-session' ? 'new-browser-session' : command.path.split('/').at(-1).replace('.jsonl', '');
+    f.state.entries = structuredClone(saved.get(f.state.id) || []);
+    bridge.update({ type: 'session_start' }, f.ctx);
+    return { accepted: true };
+  },
+});
 bridge.update({ type: 'session_start' }, f.ctx);
 f.pi.sendUserMessage = (text, options) => {
   f.state.calls.push(['submit', text, options.deliverAs]);
@@ -65,13 +77,56 @@ try {
   assert.equal(await evaluate('getComputedStyle(document.documentElement).colorScheme'), 'light');
   assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(248, 250, 249)');
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/desktop-empty.png`, Buffer.from(result.data, 'base64')));
-  for (const [width, height] of [[1440, 1000], [1024, 768], [768, 650], [600, 700]]) {
+  for (const [width, height] of [[1440, 1000], [1024, 768], [768, 650], [1024, 500], [600, 700]]) {
     await viewport(width, height); await pause(120);
     const dimensions = await evaluate('({width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight})');
     assert.ok(dimensions.scrollWidth <= width, JSON.stringify(dimensions));
-    assert.ok(dimensions.scrollHeight <= height, JSON.stringify(dimensions));
+    assert.ok(dimensions.scrollHeight <= height, JSON.stringify({ ...dimensions, boxes: await evaluate("[...document.querySelectorAll('.app,.workspace,.sidebar,main,main>*')].map(n=>({tag:n.tagName,cls:n.className,top:n.getBoundingClientRect().top,bottom:n.getBoundingClientRect().bottom,height:n.clientHeight,scroll:n.scrollHeight}))") }));
     results.push({ test: 'viewport without page overflow', ...dimensions });
   }
+  assert.equal(await evaluate("document.getElementById('cwd').textContent"), '/example/project');
+  const readyFont = await evaluate("getComputedStyle(document.getElementById('status')).fontSize");
+  await viewport(1024, 500);
+  assert.ok(await evaluate("document.querySelector('.sidebar').scrollHeight > document.querySelector('.sidebar').clientHeight"));
+  assert.ok(await evaluate("document.getElementById('status').getBoundingClientRect().bottom <= document.getElementById('prompt').getBoundingClientRect().top"));
+  assert.ok(await evaluate("document.querySelector('.sidebar').contains(document.getElementById('usage'))"));
+  assert.equal(await evaluate("document.getElementById('session-details-panel').open"), false);
+  assert.ok(await evaluate("document.getElementById('session-model').checkVisibility()"));
+  await evaluate("document.querySelector('#session-details-panel summary').click()");
+  assert.equal(await evaluate("document.getElementById('session-details-panel').open"), true);
+  await evaluate("document.getElementById('session-id').focus()");
+  assert.equal(await evaluate("getComputedStyle(document.getElementById('session-id-tooltip')).display"), 'block');
+  assert.equal(await evaluate("document.getElementById('session-id-tooltip').textContent"), f.state.id);
+  await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
+  await cdp('Browser.grantPermissions', { origin: new URL(server.url).origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  await evaluate("document.getElementById('session-id').click()");
+  await until(() => evaluate("document.querySelector('#toasts .toast-message')?.textContent === 'Session ID copied'"), 'copy session ID');
+  assert.equal(await evaluate('navigator.clipboard.readText()'), f.state.id);
+  await pause(600);
+  assert.equal(await evaluate("document.querySelectorAll('.sidebar [role=tooltip]').length"), 1);
+  const detailValues = await evaluate("[...document.querySelectorAll('#session-details .detail-copy')].map(b => ({label:b.getAttribute('aria-label'), value:b.textContent}))");
+  for (let index = 0; index < detailValues.length; index++) {
+    await evaluate(`document.querySelectorAll('#session-details .detail-copy')[${index}].click()`);
+    await until(async () => (await evaluate('navigator.clipboard.readText()')) === detailValues[index].value, detailValues[index].label);
+  }
+  assert.equal(await evaluate("document.querySelectorAll('#toasts .toast').length"), detailValues.length + 1);
+  const firstRemainingTop = await evaluate("document.querySelectorAll('#toasts .toast')[1].getBoundingClientRect().top");
+  await until(() => evaluate("document.querySelector('#toasts .toast')?.classList.contains('leaving')"), 'oldest toast expires first');
+  await pause(220);
+  assert.ok(await evaluate("document.querySelector('#toasts .toast').getBoundingClientRect().top") < firstRemainingTop);
+  await until(() => evaluate("document.querySelectorAll('#toasts .toast').length === 0"), 'copy notifications expire');
+  results.push({ test: 'Copy toasts stack, expire oldest first after three seconds, and move remaining messages upward', status: 'pass' });
+  assert.ok(await evaluate("document.getElementById('session-model').getBoundingClientRect().top < document.getElementById('session-details-panel').getBoundingClientRect().top"));
+  assert.equal(await evaluate("[...document.querySelectorAll('#session-details dt')].some(n => n.textContent === 'Model')"), false);
+  assert.equal(await evaluate("document.getElementById('session-id').textContent"), f.state.id);
+  for (const [id, value] of [['cwd', f.ctx.cwd], ['session-name', f.pi.getSessionName()], ['session-model', f.state.model.id]]) {
+    await evaluate(`document.getElementById('${id}').click()`);
+    await until(async () => (await evaluate('navigator.clipboard.readText()')) === value, `copy ${id}`);
+  }
+
+  await evaluate("document.querySelector('#session-details-panel summary').click()");
+  assert.equal(await evaluate("document.getElementById('session-details-panel').open"), false);
+  assert.ok(await evaluate("document.getElementById('session-model').checkVisibility()"));
   await viewport(390, 500); await pause(150);
   const tiny = await evaluate('({width: innerWidth, height: innerHeight, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight})');
   assert.ok(tiny.scrollHeight > tiny.height); assert.ok(tiny.scrollWidth <= tiny.width); results.push({ test: 'tiny viewport vertical fallback', ...tiny });
@@ -167,8 +222,15 @@ try {
   }, f.ctx);
   bridge.update({ type: 'tool_execution_update', toolCallId: 'c1', toolName: 'read', partialResult: { content: [{ type: 'text', text: 'export function main() {}' }] } }, f.ctx);
   await until(() => evaluate("document.querySelector('.tool-card') !== null"), 'streaming tool card');
+  assert.equal(await evaluate("document.getElementById('expand').textContent"), 'Expand tool details');
+  assert.ok(await evaluate("Math.abs(document.getElementById('expand').getBoundingClientRect().top + document.getElementById('expand').offsetHeight / 2 - document.getElementById('status').getBoundingClientRect().top - document.getElementById('status').offsetHeight / 2) < 2"));
+  await evaluate("document.querySelector('.copy-response').click()");
+  await until(async () => (await evaluate('navigator.clipboard.readText()')) === '## Inspecting the project\nThe browser shares this Pi session.', 'copy original response Markdown');
+  results.push({ test: 'Copy response preserves raw Markdown; tool toggle has no shortcut hint and aligns with status', status: 'pass' });
+
   await until(() => evaluate("document.getElementById('status').textContent === 'Thinking…'"), 'thinking indicator');
   assert.equal(await evaluate("getComputedStyle(document.getElementById('status')).animationName"), 'thinking-shimmer');
+  assert.equal(await evaluate("getComputedStyle(document.getElementById('status')).fontSize"), readyFont);
   const position = await evaluate("getComputedStyle(document.getElementById('status')).backgroundPosition");
   await pause(150);
   assert.notEqual(await evaluate("getComputedStyle(document.getElementById('status')).backgroundPosition"), position);
@@ -213,6 +275,21 @@ try {
   await arrow('ArrowUp'); assert.equal(await input(), '<img src=x onerror=alert(1)> test');
   await arrow('ArrowDown'); assert.equal(await input(), 'next');
   await arrow('ArrowDown'); assert.equal(await input(), '');
+  await evaluate("document.getElementById('prompt').value = 'Original session draft'; document.getElementById('sessions').click()");
+  await until(() => evaluate("document.getElementById('session-dialog').open"), 'session picker');
+  await evaluate("document.getElementById('new-session').click()");
+  await until(() => evaluate("document.getElementById('session-id').textContent.includes('new-browser-session')"), 'new session');
+  assert.equal(await input(), '');
+  assert.equal(await evaluate("document.querySelectorAll('#transcript .message').length"), 0);
+  await until(() => evaluate("!document.getElementById('session-dialog').open"), 'session picker closes after creating');
+  await evaluate("document.getElementById('prompt').value = 'New session draft'; document.getElementById('sessions').click()");
+  await until(() => evaluate("document.querySelector('#session-list button') !== null && document.getElementById('session-dialog').open"), 'saved session list');
+  await evaluate("document.querySelector('#session-list button').click()");
+  await until(() => evaluate("document.getElementById('session-id').textContent === 'test-session'"), 'switch back');
+  assert.equal(await input(), 'Original session draft');
+  assert.equal(await evaluate("document.querySelectorAll('#transcript .message.user').length"), 2);
+  results.push({ test: 'New session, saved session picker, unchanged connection, restored history and per-session drafts', status: 'pass' });
+  results.push({ test: 'Full directory path, sidebar usage, short-window scrolling, status position and size, ID tooltip and clipboard', status: 'pass' });
   await evaluate("document.getElementById('prompt').value = '/login'; document.getElementById('send').click()");
   await until(() => evaluate("document.getElementById('alerts').textContent.includes('terminal')"), 'terminal-only command guidance');
   assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2);

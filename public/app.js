@@ -9,6 +9,7 @@ let localError = '', selectedConversation, submitting = false;
 const drafts = new Map();
 const submittedPrompts = new Map();
 let historyNavigation;
+let sessions = [], sessionsRequest = 0;
 const opened = new Map();
 const transcript = $('transcript');
 const welcome = transcript.firstElementChild;
@@ -20,6 +21,23 @@ function el(tag, text, className) {
   if (text !== undefined) node.textContent = String(text);
   if (className) node.className = className;
   return node;
+}
+async function copyValue(label, value) {
+  try { await navigator.clipboard.writeText(String(value)); showToast(`${label} copied`); }
+  catch { showToast('Copy unavailable. Select the value to copy manually.'); }
+}
+// Oldest notices stay at the top; each expires three seconds after appearing.
+function showToast(message) {
+  const toast = el('div', undefined, 'toast entering');
+  const content = el('div', undefined, 'toast-content');
+  content.append(el('div', message, 'toast-message'));
+  toast.append(content);
+  $('toasts').append(toast);
+  requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.remove('entering')));
+  setTimeout(() => {
+    toast.classList.add('leaving');
+    setTimeout(() => toast.remove(), 180);
+  }, 3000);
 }
 // Markdown is rendered using DOM text nodes only; model/tool HTML is never executed.
 function inline(parent, text) {
@@ -87,10 +105,21 @@ function renderTranscript() {
     } else if (item.type === 'compaction') fragment.append(detail(item.key, el('span', 'Context summary'), prose(item.text), 'thinking-card'));
     else {
       const message = el('article', undefined, `message ${item.type}`);
-      message.append(el('header', item.type === 'user' ? 'You' : item.type === 'assistant' ? `Pi${item.streaming ? ' · streaming' : ''}` : 'Context'));
+      const header = el('header', item.type === 'user' ? 'You' : item.type === 'assistant' ? `Pi${item.streaming ? ' · streaming' : ''}` : 'Context');
+      message.append(header);
       if (item.thinking) message.append(detail(`${item.key}:thinking`, el('span', 'Reasoning'), prose(item.thinking), 'thinking-card'));
       if (item.text) message.append(item.type === 'user' ? el('div', item.text, 'prose') : prose(item.text));
       if (item.error) message.append(el('p', item.error, 'danger'));
+      if (item.type === 'assistant' && item.text) {
+        const copy = el('button', undefined, 'quiet copy-response');
+        copy.setAttribute('aria-label', 'Copy response');
+        copy.title = 'Copy response';
+        const icon = el('span', undefined, 'copy-icon');
+        icon.setAttribute('aria-hidden', 'true');
+        copy.append(icon);
+        copy.onclick = () => copyValue('Response Markdown', item.text);
+        message.append(copy);
+      }
       fragment.append(message);
     }
   }
@@ -98,27 +127,32 @@ function renderTranscript() {
   transcript.scrollTop = following ? transcript.scrollHeight : scroll;
 }
 function renderNavigation() {
-  $('conversations').replaceChildren(el('p', view.session.name, 'muted'));
-  $('conversation-count').textContent = '1';
   $('tasks').replaceChildren(...view.activeTools.map(name => el('div', name, 'task')));
 }
 function controls() {
   document.querySelectorAll('[data-control]').forEach(button => { button.disabled = !online || pending; });
-  prompt.disabled = !online;
+  prompt.disabled = !online || Boolean(view?.switching);
   if (view) {
     $('abort').disabled = !online || !(view.busy || view.compacting);
     $('send').textContent = view.busy ? 'Steer ↑' : 'Send ↑';
     $('compact').disabled = !online || pending || view.busy || view.compacting || view.pendingMessages;
     $('model').disabled = !online || pending || view.busy || view.compacting;
+    const changingDisabled = !online || pending || view.busy || view.compacting || view.pendingMessages || view.switching;
+    $('sessions').disabled = changingDisabled;
+    $('new-session').disabled = changingDisabled;
+    document.querySelectorAll('#session-list button').forEach(button => { button.disabled = changingDisabled || button.dataset.current === 'true'; });
+    if (view.switching) document.querySelectorAll('[data-control]').forEach(button => { button.disabled = true; });
   }
   const working = online && Boolean(submitting || view?.busy || view?.compacting);
-  const label = !online ? 'Disconnected' : view?.compacting ? 'Compacting…' : working ? 'Thinking…' : 'Ready';
+  const label = !online ? 'Disconnected' : view?.switching ? 'Switching session…' : view?.compacting ? 'Compacting…' : working ? 'Thinking…' : 'Ready';
   if ($('status').textContent !== label) $('status').textContent = label;
   $('status').classList.toggle('working', working);
 }
 function alerts() {
   $('alerts').replaceChildren();
   for (const notice of [...(view?.notices || []).slice(-3), ...(localError ? [{ message: localError, level: 'error' }] : [])]) $('alerts').append(el('p', notice.message, notice.level));
+  $('session-error').textContent = localError;
+  $('session-error').hidden = !localError;
 }
 function render() {
   const id = view.session.id;
@@ -126,13 +160,22 @@ function render() {
     if (selectedConversation !== undefined) drafts.set(selectedConversation, historyNavigation?.draft.text ?? prompt.value);
     historyNavigation = undefined;
     prompt.value = drafts.get(id) || '';
+    sessions = []; filterSessions();
     selectedConversation = id; following = true; opened.clear();
   }
 
-  $('cwd').textContent = view.session.cwd.split(/[\\/]/).filter(Boolean).at(-1) || view.session.cwd;
-  $('cwd').title = view.session.cwd;
-  $('session-id').textContent = `SESSION ${view.session.id}`;
-  $('session-id').title = view.session.file || 'In-memory session';
+  $('cwd').textContent = view.session.displayCwd || view.session.cwd;
+  $('session-model').textContent = view.model?.modelId || 'None selected';
+  $('session-model').disabled = !view.model;
+  $('session-name').textContent = view.session.name;
+  const messages = transcriptOf(view).filter(item => ['user', 'assistant'].includes(item.type));
+  renderMetadata($('session-details'), [
+    ['Session ID', view.session.id],
+    ['Created', view.session.created ? new Date(view.session.created).toLocaleString() : 'Unknown'],
+    ['Branch messages', messages.length],
+    ['Provider', view.model?.provider || 'None selected'],
+        ['Session file', view.session.file || 'In memory'],
+  ], true);
   $('conversation-title').textContent = view.session.name;
   $('model').textContent = view.model?.modelId || 'Select model';
   $('model').title = view.model ? `${view.model.provider}/${view.model.modelId}` : 'Choose a model';
@@ -140,9 +183,13 @@ function render() {
   const usage = usageOf(view);
   const format = number => Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(number);
   const model = view.models.find(m => m.provider === view.model?.provider && m.modelId === view.model?.modelId);
-  const context = model?.contextWindow && usage.context != null ? ` · ${(usage.context / model.contextWindow * 100).toFixed(1)}% context` : '';
-  $('usage').textContent = `↑ ${format(usage.input)} ↓ ${format(usage.output)} · $${usage.cost.toFixed(3)}${context}`;
-  $('usage').title = `Cache read: ${usage.cacheRead}; cache write: ${usage.cacheWrite}. Cost is provider-reported or estimated usage, not an invoice.`;
+  const windowSize = view.context?.contextWindow || model?.contextWindow;
+  renderMetadata($('usage'), [
+    ['Input tokens', format(usage.input)], ['Output tokens', format(usage.output)],
+    ['Cache read', format(usage.cacheRead)], ['Cache write', format(usage.cacheWrite)],
+    ['Context used', usage.context == null ? 'Unknown' : `${format(usage.context)}${windowSize ? ` / ${format(windowSize)} (${(usage.context / windowSize * 100).toFixed(1)}%)` : ''}`],
+    ['Context capacity', windowSize ? format(windowSize) : 'Unknown'], ['Cost', `$${usage.cost.toFixed(3)}`],
+  ]);
   $('queue').hidden = !view.pendingMessages;
   $('queue').replaceChildren(el('p', 'Pi has queued messages. They will appear in the transcript when consumed.'));
   renderTranscript(); renderNavigation(); alerts(); controls();
@@ -170,6 +217,72 @@ async function showModels() {
     view = await response.json(); render();
     $('model-search').value = ''; filterModels(); $('model-dialog').showModal(); $('model-search').focus();
   } catch (error) { localError = error.message; alerts(); }
+}
+function renderMetadata(node, rows, copyable = false) {
+  const signature = JSON.stringify(rows);
+  if (node.dataset.values === signature) return;
+  node.dataset.values = signature;
+  node.replaceChildren(...rows.flatMap(([label, value]) => {
+    const definition = el('dd');
+    if (!copyable) definition.textContent = value;
+    else {
+      const button = el('button', value, 'quiet detail-copy');
+      button.setAttribute('aria-label', `Copy ${label}`);
+      button.onclick = () => copyValue(label, value);
+      definition.append(button);
+      if (label === 'Session ID') {
+        const tooltip = el('span', value, 'detail-tooltip');
+        tooltip.id = 'session-id-tooltip';
+        tooltip.setAttribute('role', 'tooltip');
+        button.id = 'session-id';
+        button.classList.add('mono');
+        button.setAttribute('aria-describedby', tooltip.id);
+        definition.className = 'detail-copy-wrap';
+        definition.append(tooltip);
+      }
+    }
+    return [el('dt', label), definition];
+  }));
+}
+async function refreshSessions() {
+  const request = ++sessionsRequest;
+  const id = selectedConversation;
+  try {
+    const response = await fetch('/api/sessions', { headers: { Authorization: `Bearer ${token}` } });
+    const result = await response.json();
+    if (request !== sessionsRequest || id !== selectedConversation) return;
+    if (!response.ok) throw new Error(result.error || 'Unable to load sessions.');
+    if (result.sessionId !== id) return;
+    sessions = result.sessions;
+    filterSessions();
+  } catch (error) {
+    if (request !== sessionsRequest || id !== selectedConversation) return;
+    if ($('session-dialog').open) { localError = error.message; alerts(); }
+  }
+}
+async function showSessions() {
+  localError = ''; alerts();
+  $('session-search').value = '';
+  filterSessions();
+  $('session-dialog').showModal();
+  $('session-search').focus();
+  await refreshSessions();
+}
+function filterSessions() {
+  const query = $('session-search').value.toLowerCase();
+  const list = $('session-list');
+  list.replaceChildren();
+  for (const session of sessions.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query))) {
+    const current = session.id === selectedConversation;
+    const button = el('button', session.name, current ? 'selected active' : '');
+    button.dataset.current = String(current);
+    if (current) button.setAttribute('aria-current', 'true');
+    button.append(el('small', `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}`));
+    button.onclick = async () => { if (await run('switch-session', { path: session.path })) $('session-dialog').close(); };
+    list.append(button);
+  }
+  if (!list.children.length) list.append(el('p', 'No saved sessions match. New sessions appear after Pi saves them.', 'muted'));
+  controls();
 }
 function filterModels() {
   $('models').replaceChildren();
@@ -206,10 +319,16 @@ async function submit(mode = 'steer') {
     drafts.delete(id); following = true;
   }
 }
+$('cwd').onclick = () => { if (view) void copyValue('Working directory', view.session.cwd); };
+$('session-model').onclick = () => { if (view?.model) void copyValue('Model name', view.model.modelId); };
+$('session-name').onclick = () => { if (view) void copyValue('Session name', view.session.name); };
 $('composer').onsubmit = event => { event.preventDefault(); void submit(); };
 $('follow-up').onclick = () => submit('followUp');
 $('abort').onclick = () => run('abort');
 $('model').onclick = showModels;
+$('sessions').onclick = showSessions;
+$('session-search').oninput = filterSessions;
+$('new-session').onclick = async () => { if (await run('new-session')) $('session-dialog').close(); };
 $('thinking').onclick = () => run('thinking');
 $('compact').onclick = () => $('compact-dialog').showModal();
 $('compact-form').onsubmit = async event => { event.preventDefault(); if (await run('compact', { instructions: $('compact-instructions').value })) $('compact-dialog').close(); };
