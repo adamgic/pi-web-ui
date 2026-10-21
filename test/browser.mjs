@@ -103,7 +103,8 @@ try {
   await until(() => evaluate("document.querySelector('#toasts .toast-message')?.textContent === 'Session ID copied'"), 'copy session ID');
   assert.equal(await evaluate('navigator.clipboard.readText()'), f.state.id);
   await pause(600);
-  const detailValues = await evaluate("[...document.querySelectorAll('#session-details .detail-copy')].map(b => ({label:b.getAttribute('aria-label'), value:b.nextElementSibling.textContent}))");
+  assert.equal(await evaluate("document.querySelectorAll('.sidebar [role=tooltip]').length"), 1);
+  const detailValues = await evaluate("[...document.querySelectorAll('#session-details .detail-copy')].map(b => ({label:b.getAttribute('aria-label'), value:b.textContent}))");
   for (let index = 0; index < detailValues.length; index++) {
     await evaluate(`document.querySelectorAll('#session-details .detail-copy')[${index}].click()`);
     await until(async () => (await evaluate('navigator.clipboard.readText()')) === detailValues[index].value, detailValues[index].label);
@@ -118,7 +119,7 @@ try {
   assert.ok(await evaluate("document.getElementById('session-model').getBoundingClientRect().top < document.getElementById('session-details-panel').getBoundingClientRect().top"));
   assert.equal(await evaluate("[...document.querySelectorAll('#session-details dt')].some(n => n.textContent === 'Model')"), false);
   assert.equal(await evaluate("document.getElementById('session-id').textContent"), f.state.id);
-  for (const [id, value] of [['cwd', f.ctx.cwd], ['session-name', f.pi.getSessionName()]]) {
+  for (const [id, value] of [['cwd', f.ctx.cwd], ['session-name', f.pi.getSessionName()], ['session-model', f.state.model.id]]) {
     await evaluate(`document.getElementById('${id}').click()`);
     await until(async () => (await evaluate('navigator.clipboard.readText()')) === value, `copy ${id}`);
   }

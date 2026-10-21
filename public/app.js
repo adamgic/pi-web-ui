@@ -154,8 +154,8 @@ function render() {
   }
 
   $('cwd').textContent = view.session.displayCwd || view.session.cwd;
-  $('cwd').title = `Copy working directory: ${view.session.cwd}`;
   $('session-model').textContent = view.model?.modelId || 'None selected';
+  $('session-model').disabled = !view.model;
   $('session-name').textContent = view.session.name;
   const messages = transcriptOf(view).filter(item => ['user', 'assistant'].includes(item.type));
   renderMetadata($('session-details'), [
@@ -211,21 +211,24 @@ function renderMetadata(node, rows, copyable = false) {
   const signature = JSON.stringify(rows);
   if (node.dataset.values === signature) return;
   node.dataset.values = signature;
-  node.replaceChildren(...rows.flatMap(([label, value], index) => {
+  node.replaceChildren(...rows.flatMap(([label, value]) => {
     const definition = el('dd');
     if (!copyable) definition.textContent = value;
     else {
       const button = el('button', value, 'quiet detail-copy');
-      const tooltip = el('span', value, 'detail-tooltip');
-      tooltip.id = label === 'Session ID' ? 'session-id-tooltip' : `session-detail-tooltip-${index}`;
-      tooltip.setAttribute('role', 'tooltip');
       button.setAttribute('aria-label', `Copy ${label}`);
-      button.setAttribute('aria-describedby', tooltip.id);
-      button.title = `Copy ${label}`;
-      if (label === 'Session ID') { button.id = 'session-id'; button.classList.add('mono'); }
       button.onclick = () => copyValue(label, value);
-      definition.className = 'detail-copy-wrap';
-      definition.append(button, tooltip);
+      definition.append(button);
+      if (label === 'Session ID') {
+        const tooltip = el('span', value, 'detail-tooltip');
+        tooltip.id = 'session-id-tooltip';
+        tooltip.setAttribute('role', 'tooltip');
+        button.id = 'session-id';
+        button.classList.add('mono');
+        button.setAttribute('aria-describedby', tooltip.id);
+        definition.className = 'detail-copy-wrap';
+        definition.append(tooltip);
+      }
     }
     return [el('dt', label), definition];
   }));
@@ -306,6 +309,7 @@ async function submit(mode = 'steer') {
   }
 }
 $('cwd').onclick = () => { if (view) void copyValue('Working directory', view.session.cwd); };
+$('session-model').onclick = () => { if (view?.model) void copyValue('Model name', view.model.modelId); };
 $('session-name').onclick = () => { if (view) void copyValue('Session name', view.session.name); };
 $('composer').onsubmit = event => { event.preventDefault(); void submit(); };
 $('follow-up').onclick = () => submit('followUp');
