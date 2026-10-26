@@ -206,3 +206,23 @@ relative resources. Preview scripts cannot access the parent app or its storage.
 
 The app has a π favicon. The main browser tab follows the session name (including
 renames and session switches), with `pi-web-ui` for an unnamed empty session.
+
+## Pull request validation
+
+`.github/workflows/validate-pr.yml` runs on every PR opening, new commit, reopening,
+edit, and transition to ready for review. Draft PRs are tested too. It can also be
+run manually from Actions. New runs cancel older runs for the same PR.
+
+- Syntax and unit/server tests run on Node 22.19.0 (the supported minimum) and 24.
+- Browser checks run on Ubuntu 24.04 with the runner's Google Chrome and Node 24.
+- Browser logs, results, and screenshots are retained as artifacts for seven days,
+  including on test failure. Tests use fixtures and bundled libraries; no install,
+  Pi account, or secrets are needed.
+
+Local equivalents are `npm run check`, `npm test`, and `npm run test:browser`.
+Set `CHROME_PATH` when Chrome is not at the default macOS location.
+
+To enforce validation before merging, require these checks in the GitHub branch
+ruleset: `Syntax and tests (Node 22.19.0)`, `Syntax and tests (Node 24)`, and
+`Chromium browser checks`. Adding the workflow alone reports results but does not
+change branch protection settings.

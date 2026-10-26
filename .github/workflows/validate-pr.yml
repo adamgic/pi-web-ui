@@ -1,0 +1,69 @@
+name: Validate PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Syntax and tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.19.0', '24']
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      # Tests use Node built-ins, fixtures, and bundled browser libraries.
+      # No npm install (or live Pi credentials) is needed.
+      - name: Check syntax
+        run: npm run check
+      - name: Run unit and server tests
+        run: npm test
+
+  browser:
+    name: Chromium browser checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Locate runner Chrome
+        shell: bash
+        run: |
+          chrome_path="$(command -v google-chrome)"
+          "$chrome_path" --version
+          echo "CHROME_PATH=$chrome_path" >> "$GITHUB_ENV"
+      - name: Run browser tests
+        shell: bash
+        run: |
+          mkdir -p output
+          npm run test:browser 2>&1 | tee output/browser.log
+      - name: Upload browser results and screenshots
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: browser-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: output/
+          if-no-files-found: ignore
+          retention-days: 7
