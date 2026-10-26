@@ -193,3 +193,16 @@ separate light/dark shades that follow the browser's appearance setting. All
 nesting shades meet 4.5:1 contrast against the UI and code backgrounds. Hovering
 a colored section shows its actual level and color, including levels beyond the
 five-color cycle. Both modes preserve the exact source text and indentation.
+
+Markdown previews also support pipe tables (including left/center/right column
+alignment and formatted cells) and italics written as `*text*` or `_text_`.
+
+HTML files open in a browser-rendered, isolated frame. **View source** switches
+to the exact HTML with standard or nesting-level highlighting; **View HTML**
+switches back. HTML/XML nesting colors follow tags. Local relative assets are
+served from the HTML file's directory and its subdirectories; references outside
+that directory are not served. Remote HTML uses its original URL as the base for
+relative resources. Preview scripts cannot access the parent app or its storage.
+
+The app has a π favicon. The main browser tab follows the session name (including
+renames and session switches), with `pi-web-ui` for an unnamed empty session.

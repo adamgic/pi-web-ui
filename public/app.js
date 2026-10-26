@@ -118,6 +118,7 @@ function alerts() {
   $('session-error').hidden = !localError;
 }
 function render() {
+  document.title = view.session.title || (view.session.name !== 'New session' && view.session.name) || 'pi-web-ui';
   const id = view.session.id;
   if (id !== selectedConversation) {
     if (selectedConversation !== undefined) drafts.set(selectedConversation, historyNavigation?.draft.text ?? prompt.value);

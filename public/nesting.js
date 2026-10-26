@@ -46,6 +46,7 @@ export function jsonNesting(source) {
 
 export function nestingParts(source, language = '') {
   if (language === 'json') return jsonNesting(source);
+  if (language === 'xml') return markupNesting(source);
   const out = collector();
   const indented = ['python', 'yaml'].includes(language);
   const hashComments = ['python', 'yaml', 'bash', 'ruby', 'perl', 'r', 'ini'].includes(language);
@@ -112,5 +113,25 @@ export function nestingParts(source, language = '') {
     out.add(chunk, depth); index += chunk.length;
     if (!/^\s+$/.test(chunk)) previous = chunk;
   }
+  return out.parts;
+}
+
+function markupNesting(source) {
+  const out = collector(), stack = [];
+  const voids = new Set('area base br col embed hr img input link meta param source track wbr'.split(' '));
+  const pattern = /<!--[\s\S]*?(?:-->|$)|<![^>]*>|<\?[^>]*>|<\/?[a-zA-Z][\w:.-]*(?:"[^"]*"|'[^']*'|[^'">])*?>/g;
+  let end = 0;
+  for (const match of source.matchAll(pattern)) {
+    const tag = match[0], name = /^<\/?([\w:.-]+)/.exec(tag)?.[1].toLowerCase();
+    if (['script', 'style'].includes(stack.at(-1)) && !(tag.startsWith('</') && name === stack.at(-1))) continue;
+    out.add(source.slice(end, match.index), stack.length);
+    if (name && tag.startsWith('</')) {
+      const position = stack.lastIndexOf(name); if (position >= 0) stack.length = position;
+    }
+    out.add(tag, stack.length);
+    if (name && !tag.startsWith('</') && !tag.endsWith('/>') && !voids.has(name)) stack.push(name);
+    end = match.index + tag.length;
+  }
+  out.add(source.slice(end), stack.length);
   return out.parts;
 }

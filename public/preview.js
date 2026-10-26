@@ -16,7 +16,9 @@ try {
     document.title = `${file.path.split('/').pop()} · Pi`;
     const remote = /^https?:/i.test(file.path);
     const pathname = remote ? new URL(file.path).pathname : file.path;
-    let source = !/\.(md|markdown)$/i.test(pathname) && !file.type?.includes('text/markdown');
+    const isHtml = Boolean(file.htmlUrl);
+    const hasPreview = isHtml || /\.(md|markdown)$/i.test(pathname) || file.type?.includes('text/markdown');
+    let source = !hasPreview;
     const language = languageFor(pathname);
     const mode = document.getElementById('highlight-mode');
     mode.value = savedHighlightMode();
@@ -32,15 +34,23 @@ try {
         ? 'Standard syntax · Highlight.js'
         : language === 'json' ? 'Keys → values → nested keys → nested values. Colors repeat every five levels.'
         : ['python', 'yaml'].includes(language) ? 'Indentation and bracket nesting. Colors repeat every five levels.'
-        : language === 'plaintext' ? 'Plain text: no language detected.'
+        : language === 'xml' ? 'Tag nesting. Colors repeat every five levels.'
+          : language === 'plaintext' ? 'Plain text: no language detected.'
         : 'Bracket nesting; strings and comments stay at their surrounding level. Colors repeat every five levels.';
       if (source) content.replaceChildren(highlightedCode(file.content, language, mode.value));
+      else if (isHtml) {
+        const frame = document.createElement('iframe');
+        frame.className = 'html-preview'; frame.title = 'Rendered HTML';
+        frame.setAttribute('sandbox', 'allow-scripts'); frame.src = file.htmlUrl;
+        content.replaceChildren(frame);
+      }
       else content.replaceChildren(prose(file.content, { token, cwd: remote ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) }));
     };
     mode.onchange = () => { saveHighlightMode(mode.value); render(); };
     const toggle = document.getElementById('toggle');
-    toggle.hidden = source;
-    toggle.onclick = () => { source = !source; toggle.textContent = source ? 'View preview' : 'View source'; render(); };
+    toggle.hidden = !hasPreview;
+    toggle.textContent = 'View source';
+    toggle.onclick = () => { source = !source; toggle.textContent = source ? (isHtml ? 'View HTML' : 'View preview') : 'View source'; render(); };
     render();
   }
 } catch (error) { content.textContent = error.message; }

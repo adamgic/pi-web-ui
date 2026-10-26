@@ -1,3 +1,4 @@
+import { htmlPreviews } from './html-preview.mjs';
 import { mediaType, serveMedia } from './media.mjs';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -7,6 +8,7 @@ import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
 const assets = new Map([
+  ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/preview.html', ['preview.html', 'text/html; charset=utf-8']],
   ['/preview.js', ['preview.js', 'text/javascript; charset=utf-8']],
@@ -44,6 +46,7 @@ export async function startServer(bridge, { port = 0 } = {}) {
   const clients = new Set();
   const receipts = new Map();
   const media = new Map();
+  const html = htmlPreviews();
   let origin;
   let timer;
   let queue = Promise.resolve();
@@ -88,8 +91,12 @@ export async function startServer(bridge, { port = 0 } = {}) {
     try {
       if (closing) throw error(503, 'Server is closing.');
       if (req.headers.host !== new URL(origin).host) throw error(403, 'Invalid host.');
-      if (req.headers.origin && req.headers.origin !== origin) throw error(403, 'Cross-origin requests are not allowed.');
       const url = new URL(req.url, origin);
+      if (url.pathname.startsWith('/html/')) {
+        if (req.headers.origin && ![origin, 'null'].includes(req.headers.origin)) throw error(403, 'Cross-origin requests are not allowed.');
+        await html.serve(req, res, url); return;
+      }
+      if (req.headers.origin && req.headers.origin !== origin) throw error(403, 'Cross-origin requests are not allowed.');
       if (url.pathname.startsWith('/media/')) {
         const entry = media.get(url.pathname);
         if (!entry || !['GET', 'HEAD'].includes(req.method)) throw error(404, 'Media link not found. Reopen the file from the response.');
@@ -149,7 +156,9 @@ export async function startServer(bridge, { port = 0 } = {}) {
             try { bytes = await readFile(path); } catch { throw error(403, 'This file cannot be read.'); }
           }
           if (bytes.includes(0)) throw error(415, 'Binary files cannot be displayed as text.');
-          json(res, 200, { path, type, content: bytes.toString('utf8') }); return;
+          const content = bytes.toString('utf8');
+          const isHtml = /\.html?$/i.test(/^https?:/i.test(path) ? new URL(path).pathname : path) || /^text\/html\b/i.test(type);
+          json(res, 200, { path, type, content, ...(isHtml ? { htmlUrl: html.add(path, content) } : {}) }); return;
         }
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
           json(res, 200, await bridge.listSessions()); return;
@@ -212,7 +221,7 @@ export async function startServer(bridge, { port = 0 } = {}) {
       if (closePromise) return closePromise;
       closing = true; unsubscribe(); clearTimeout(timer); clearInterval(heartbeat);
       for (const res of clients) res.end();
-      clients.clear(); media.clear();
+      clients.clear(); media.clear(); html.clear();
       closePromise = new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
       return closePromise;
     },

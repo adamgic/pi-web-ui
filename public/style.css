@@ -171,3 +171,12 @@
 .equation-display { overflow-x: auto; padding: 12px 0; margin: 12px 0; }
 .equation-display math { margin: 0 auto; }
 .equation-error { font-family: monospace; white-space: pre-wrap; }
+
+.table-scroll { overflow-x: auto; margin: 14px 0; }
+.prose table { border-collapse: collapse; width: 100%; font-size: inherit; }
+.prose th, .prose td { border: 1px solid var(--line); padding: 9px 12px; }
+.prose th { background: var(--code-bg); font-weight: 650; }
+.prose .align-left { text-align: left; }
+.prose .align-center { text-align: center; }
+.prose .align-right { text-align: right; }
+.prose em { font-style: italic; }

@@ -11,7 +11,7 @@ export function linkTarget(value, { token = '', cwd = '' } = {}) {
   if (/^https?:\/\//i.test(cwd) && !/^[a-z][a-z0-9+.-]*:/i.test(value)) value = new URL(value, cwd).href;
   if (/^https?:\/\//i.test(value)) {
     // Web pages retain their native viewer; text/Markdown files use our preview.
-    if (!/\.(?:md|markdown|txt|json|csv|log|ya?ml|xml|js|ts|py|css)$/i.test(new URL(value).pathname)) return value;
+    if (!/\.(?:md|markdown|txt|json|csv|log|ya?ml|xml|html?|js|ts|py|css)$/i.test(new URL(value).pathname)) return value;
   }
   if (value.startsWith('#')) return value;
   if (/^[a-z][a-z0-9+.-]*:/i.test(value.replace(/:\d+(?::\d+)?$/, '')) && !/^(?:file:|https?:)/i.test(value)) return null;
@@ -24,7 +24,7 @@ export function linkTarget(value, { token = '', cwd = '' } = {}) {
   return `/preview.html?${params}#token=${encodeURIComponent(token)}`;
 }
 function inline(parent, text, options) {
-  const pattern = /(`[^`]+`|\\\$|\$\$[^$]+\$\$|\$(?!\s)(?:\\.|[^$\\])+?\$|\\\([\s\S]+?\\\)|\*\*[^*]+\*\*|\[[^\]]+\]\((?:<[^>]+>|[^)]+)\)|https?:\/\/[^\s<>]+|(?:\.?\.?\/)?(?:[\w@~.-]+\/)*[\w@.-]+\.[a-zA-Z][a-zA-Z0-9]{0,9}(?::\d+(?::\d+)?)?)/g;
+  const pattern = /(`[^`]+`|\\\$|\$\$[^$]+\$\$|\$(?!\s)(?:\\.|[^$\\])+?\$|\\\([\s\S]+?\\\)|\*\*[^*]+\*\*|(?<!\\)\*(?!\s)[^*\n]+?\*|(?<![\w\\])_(?!\s)[^_\n]+?_(?!\w)|\[[^\]]+\]\((?:<[^>]+>|[^)]+)\)|https?:\/\/[^\s<>]+|(?:\.?\.?\/)?(?:[\w@~.-]+\/)*[\w@.-]+\.[a-zA-Z][a-zA-Z0-9]{0,9}(?::\d+(?::\d+)?)?)/g;
   const appendLink = (label, target, code = false) => {
     const href = linkTarget(target, options);
     const content = code ? el('code', label) : document.createTextNode(label);
@@ -47,6 +47,7 @@ function inline(parent, text, options) {
       const value = part.slice(1, -1);
       appendLink(value, value, true);
     } else if (part.startsWith('**')) { const strong = el('strong'); inline(strong, part.slice(2, -2), options); parent.append(strong); }
+    else if (part.startsWith('*') || part.startsWith('_')) { const em = el('em'); inline(em, part.slice(1, -1), options); parent.append(em); }
     else if (part.startsWith('[')) {
       const split = part.indexOf('](');
       appendLink(part.slice(1, split), part.slice(split + 2, -1).replace(/^<|>$/g, ''));
@@ -61,7 +62,9 @@ function inline(parent, text, options) {
 export function prose(text, options = {}) {
   const node = el('div', undefined, 'prose');
   let code, paragraph, list, math, mathEnd;
-  for (const line of String(text || '').split('\n')) {
+  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  for (let row = 0; row < lines.length; row++) {
+    const line = lines[row];
     if (!code && math) {
       const end = line.indexOf(mathEnd);
       if (end < 0) math.push(line);
@@ -82,6 +85,24 @@ export function prose(text, options = {}) {
       paragraph = undefined; list = undefined; continue;
     }
     if (code) { code.append(document.createTextNode(`${line}\n`)); continue; }
+    const cells = tableCells(line), separators = tableCells(lines[row + 1] || '');
+    if (cells.length && cells.length === separators.length && separators.every(cell => /^:?-{3,}:?$/.test(cell))) {
+      const wrap = el('div', undefined, 'table-scroll'), table = el('table'), head = el('thead'), header = el('tr'), body = el('tbody');
+      const appendRow = (parent, values, tag) => {
+        const tr = tag === 'th' ? header : el('tr');
+        cells.forEach((_, index) => {
+          const cell = el(tag);
+          if (tag === 'th') cell.scope = 'col';
+          cell.className = separators[index].endsWith(':') ? (separators[index].startsWith(':') ? 'align-center' : 'align-right') : 'align-left';
+          inline(cell, values[index] || '', options); tr.append(cell);
+        });
+        parent.append(tr);
+      };
+      appendRow(head, cells, 'th'); row++;
+      while (row + 1 < lines.length && lines[row + 1].includes('|') && lines[row + 1].trim()) appendRow(body, tableCells(lines[++row]), 'td');
+      table.append(head, body); wrap.append(table); node.append(wrap);
+      paragraph = undefined; list = undefined; continue;
+    }
     const item = /^\s*(?:([-+*])|\d+[.)])\s+(.+)$/.exec(line);
     if (item) {
       const tag = item[1] ? 'ul' : 'ol';
@@ -118,4 +139,24 @@ async function verifyFiles(candidates, { token = '' } = {}) {
       group.forEach((a, index) => { if (exists[index]) a.href = a.dataset.fileCandidate; else a.replaceWith(...a.childNodes); delete a.dataset.fileCandidate; });
     } catch { group.forEach(a => a.replaceWith(...a.childNodes)); }
   }
+}
+
+// Pipes in code spans and escaped pipes belong to the cell, not the table grid.
+function tableCells(line) {
+  if (!line.includes('|')) return [];
+  const cells = []; let cell = '', ticks = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '\\' && line[i + 1] === '|') { cell += '|'; i++; continue; }
+    if (line[i] === '`') {
+      let end = i; while (line[end] === '`') end++;
+      const count = end - i; if (!ticks) ticks = count; else if (ticks === count) ticks = 0;
+      cell += line.slice(i, end); i = end - 1; continue;
+    }
+    if (line[i] === '|' && !ticks) { cells.push(cell.trim()); cell = ''; }
+    else cell += line[i];
+  }
+  cells.push(cell.trim());
+  if (line.trim().startsWith('|')) cells.shift();
+  if (line.trim().endsWith('|') && cells.at(-1) === '') cells.pop();
+  return cells;
 }

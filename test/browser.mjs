@@ -94,6 +94,25 @@ try {
   assert.match(links.links[0].href, /My\+Notes.md/);
   assert.match(links.links[1].href, /README.md%3A12/);
   results.push({ test: 'Markdown links, bare paths, inline code paths, external URLs and safe DOM rendering', status: 'pass' });
+  assert.equal(await evaluate('document.title'), 'Test session');
+  assert.equal(await evaluate("document.querySelector('link[rel=icon]').getAttribute('href')"), '/favicon.svg');
+  f.pi.getSessionName = () => undefined;
+  bridge.update({ type: 'session_start' }, f.ctx);
+  await until(() => evaluate("document.title === 'pi-web-ui'"), 'empty session page title');
+  f.pi.getSessionName = () => 'Renamed session';
+  bridge.update({ type: 'session_start' }, f.ctx);
+  await until(() => evaluate("document.title === 'Renamed session'"), 'renamed page title');
+  f.pi.getSessionName = () => 'Test session';
+  bridge.update({ type: 'session_start' }, f.ctx);
+  const table = await evaluate(`(async () => {
+    const { prose } = await import('/prose.js');
+    const node = prose(${JSON.stringify('| Name | Value | Note |\n| :--- | ---: | :---: |\n| *italic* | **bold** | _also italic_ |\n| \`a|b\` | escaped\\|pipe | snake_case_name |'.replaceAll('\`', '`'))}, { checkFiles: false });
+    return { rows: node.querySelectorAll('tbody tr').length, headers: node.querySelectorAll('th').length, em: node.querySelectorAll('em').length, bold: node.querySelectorAll('strong').length, code: node.querySelector('code')?.textContent, cells: [...node.querySelectorAll('td')].map(n => n.textContent), aligns: [...node.querySelectorAll('th')].map(n => n.className) };
+  })()`);
+  assert.equal(table.rows, 2); assert.equal(table.headers, 3); assert.equal(table.em, 2); assert.equal(table.bold, 1);
+  assert.equal(table.code, 'a|b'); assert.ok(table.cells.includes('escaped|pipe')); assert.ok(table.cells.includes('snake_case_name'));
+  assert.deepEqual(table.aligns, ['align-left', 'align-right', 'align-center']);
+  results.push({ test: 'Markdown tables, aligned formatted cells, italics, pi favicon and live session titles', status: 'pass' });
   assert.equal(await evaluate('getComputedStyle(document.documentElement).colorScheme'), 'light');
   assert.equal(await evaluate('getComputedStyle(document.body).backgroundColor'), 'rgb(248, 250, 249)');
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/desktop-empty.png`, Buffer.from(result.data, 'base64')));
@@ -375,6 +394,25 @@ try {
   })()`);
   assert.deepEqual(safeCode, [{ text: '<script>alert(1)</script>', scripts: 0 }, { text: '<script>alert(1)</script>', scripts: 0 }]);
   results.push({ test: 'Python/JSON depth colors, standard Highlight.js, persistent toggle, exact source, light/dark palettes and safe markup', status: 'pass' });
+  const htmlListener = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "window.addEventListener('message', event => { if (event.data?.previewTest) window.htmlPreviewResult = event.data; });" });
+  const htmlSource = await readFile(`${root}test/fixtures/preview.html`, 'utf8');
+  await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/preview.html` })}#token=${server.token}` });
+  await until(() => evaluate("Boolean(document.querySelector('iframe.html-preview'))"), 'HTML iframe');
+  await until(() => evaluate('Boolean(window.htmlPreviewResult)'), 'rendered HTML script and document');
+  const frameResult = await evaluate('window.htmlPreviewResult');
+  assert.equal(frameResult.heading, 'Rendered HTML preview');
+  assert.equal(frameResult.color, 'rgb(20, 90, 160)');
+  await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: htmlListener.identifier });
+  assert.equal(await evaluate('document.body.dataset.previewEscaped'), undefined);
+  assert.equal(await evaluate("document.getElementById('highlight-controls').hidden"), true);
+  await evaluate("document.getElementById('toggle').click()");
+  assert.equal(await evaluate("document.querySelector('.source-code').textContent"), htmlSource);
+  assert.ok(await evaluate("document.querySelectorAll('[data-depth]').length > 2"));
+  await evaluate("document.getElementById('highlight-mode').value = 'standard'; document.getElementById('highlight-mode').dispatchEvent(new Event('change'))");
+  assert.ok(await evaluate("Boolean(document.querySelector('.hljs-tag'))"));
+  await evaluate("document.getElementById('toggle').click()");
+  assert.ok(await evaluate("Boolean(document.querySelector('iframe.html-preview'))"));
+  results.push({ test: 'HTML native rendering, relative CSS, isolated scripts, source toggle and both highlighting modes', status: 'pass' });
   // Produce a real PNG and WebM with browser-native encoders for decoding checks.
   const mediaData = await evaluate(`(async () => {
     const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90;
