@@ -1,7 +1,7 @@
 // Real Chromium checks using its built-in DevTools protocol; no browser-test dependency.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../src/server.mjs';
 import { createBridge } from '../src/bridge.mjs';
@@ -43,6 +43,7 @@ async function until(fn, message) {
   throw new Error(`Timed out: ${message}`);
 }
 const results = [];
+const mediaDiagnostics = [];
 try {
   const port = await until(async () => (await readFile(`${profile}/DevToolsActivePort`, 'utf8')).split('\n')[0], 'Chrome startup');
   const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
@@ -54,6 +55,12 @@ try {
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.id) { const entry = requests.get(message.id); if (!entry) return; clearTimeout(entry.timer); requests.delete(message.id); message.error ? entry.reject(new Error(JSON.stringify(message.error))) : entry.resolve(message.result); }
+    if (message.method === 'Network.responseReceived' && message.params.response.url.includes('/media/')) {
+      const { status, mimeType, headers } = message.params.response;
+      mediaDiagnostics.push({ event: 'response', status, mimeType, headers });
+    }
+    if (message.method === 'Network.loadingFailed') mediaDiagnostics.push({ event: 'loadingFailed', ...message.params });
+    if (message.method === 'Log.entryAdded' && ['warning', 'error'].includes(message.params.entry.level)) mediaDiagnostics.push({ event: 'browserLog', ...message.params.entry });
     if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails.text);
   };
   const cdp = (method, params = {}) => new Promise((resolve, reject) => {
@@ -70,6 +77,7 @@ try {
   const arrow = key => cdp('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key === 'ArrowUp' ? 38 : 40 });
   const input = () => evaluate("document.getElementById('prompt').value");
   await cdp('Runtime.enable'); await cdp('Page.enable');
+  await cdp('Network.enable'); await cdp('Log.enable');
   await viewport(1440, 1000);
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await cdp('Page.navigate', { url: server.url });
@@ -413,32 +421,39 @@ try {
   await evaluate("document.getElementById('toggle').click()");
   assert.ok(await evaluate("Boolean(document.querySelector('iframe.html-preview'))"));
   results.push({ test: 'HTML native rendering, relative CSS, isolated scripts, source toggle and both highlighting modes', status: 'pass' });
-  // Produce a real PNG and WebM with browser-native encoders for decoding checks.
-  const mediaData = await evaluate(`(async () => {
+  // Decode a fixed, validated VP8 clip. Recording a canvas for 300 ms here
+  // made this test depend on headless capture/encoder scheduling on the runner.
+  const png = await evaluate(`(() => {
     const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90;
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#80baff'; ctx.fillRect(0, 0, 160, 90);
-    const png = canvas.toDataURL('image/png').split(',')[1];
-    const stream = canvas.captureStream(10);
-    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
-    const chunks = []; recorder.ondataavailable = event => chunks.push(event.data);
-    const stopped = new Promise(resolve => recorder.onstop = resolve);
-    recorder.start(); await new Promise(resolve => setTimeout(resolve, 300)); recorder.stop(); await stopped;
-    stream.getTracks().forEach(track => track.stop());
-    const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer());
-    return { png, video: btoa(String.fromCharCode(...bytes)) };
+    return canvas.toDataURL('image/png').split(',')[1];
   })()`);
-  await writeFile(`${out}/native-image.png`, Buffer.from(mediaData.png, 'base64'));
-  await writeFile(`${out}/native-video.webm`, Buffer.from(mediaData.video, 'base64'));
+  await writeFile(`${out}/native-image.png`, Buffer.from(png, 'base64'));
+  await copyFile(`${root}test/fixtures/native-video.webm`, `${out}/native-video.webm`);
   for (const [name, selector] of [['native-image.png', 'img'], ['native-video.webm', 'video']]) {
     await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${out}/${name}` })}#token=${server.token}` });
     await until(() => evaluate(`location.pathname.startsWith('/media/') && Boolean(document.querySelector('${selector}'))`), `native ${selector} viewer`);
     try {
+      // Request media loading explicitly rather than relying on native autoplay
+      // policy, which varies across Chrome versions and headless environments.
+      if (selector === 'video') await evaluate("document.querySelector('video').preload = 'auto'; document.querySelector('video').load()");
       await until(() => evaluate(selector === 'img' ? "document.querySelector('img').naturalWidth === 160" : "document.querySelector('video').readyState >= 1"), `native ${selector} decoding`);
     } catch (error) {
-      throw new Error(`${error.message}: ${JSON.stringify(await evaluate("({ html: document.body.innerHTML, error: document.querySelector('video')?.error?.message })"))}`);
+      const state = await evaluate(`(() => {
+        const video = document.querySelector('video');
+        return { html: document.body.innerHTML, readyState: video?.readyState, networkState: video?.networkState,
+          currentSrc: video?.currentSrc, paused: video?.paused, duration: video?.duration,
+          width: video?.videoWidth, height: video?.videoHeight, error: video?.error && { code: video.error.code, message: video.error.message } };
+      })()`);
+      await writeFile(`${out}/media-diagnostics.json`, JSON.stringify({ state, events: mediaDiagnostics }, null, 2));
+      throw new Error(`${error.message}: ${JSON.stringify(state)}`);
     }
     assert.equal(await evaluate("Boolean(document.querySelector('#highlight-controls, #toggle, .file-preview'))"), false);
-    if (selector === 'video') assert.ok(await evaluate("document.querySelector('video').controls"));
+    if (selector === 'video') {
+      assert.ok(await evaluate("document.querySelector('video').controls"));
+      assert.deepEqual(await evaluate("({ width: document.querySelector('video').videoWidth, height: document.querySelector('video').videoHeight })"), { width: 160, height: 90 });
+      assert.equal(await evaluate("document.querySelector('video').duration"), 2);
+    }
   }
   results.push({ test: 'Native image and video documents decode correctly with no app preview controls', status: 'pass' });
   assert.deepEqual(exceptions, []);
@@ -451,6 +466,9 @@ try {
   results.push({ test: 'History switches preserve character column in both directions, clamp short lines, and restore the draft caret', status: 'pass' });
   await writeFile(`${out}/browser-results.json`, JSON.stringify(results, null, 2));
   console.log(JSON.stringify(results, null, 2));
+} catch (error) {
+  await writeFile(`${out}/browser-results.json`, JSON.stringify({ passed: results, failure: error.stack, mediaDiagnostics }, null, 2));
+  throw error;
 } finally {
   socket?.close(); chrome.kill('SIGTERM'); await server.close();
 }
