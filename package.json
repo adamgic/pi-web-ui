@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node start.mjs",
     "check": "node scripts/check.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node test/browser.mjs"
   },
   "engines": { "node": ">=22.19.0" }
 }
