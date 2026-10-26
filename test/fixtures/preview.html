@@ -1,0 +1,7 @@
+<!doctype html>
+<html><head><title>Example HTML</title><link rel="stylesheet" href="preview-style.css"></head>
+<body><h1 id="rendered-heading">Rendered HTML preview</h1><p><em>Browser italics</em></p><script>
+try { parent.document.body.dataset.previewEscaped = 'yes'; } catch { }
+document.body.dataset.scriptRan = 'yes';
+parent.postMessage({ previewTest: true, heading: document.querySelector('h1').textContent, color: getComputedStyle(document.querySelector('h1')).color }, '*');
+</script></body></html>

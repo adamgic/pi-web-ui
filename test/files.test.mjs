@@ -56,3 +56,26 @@ test('external Markdown is fetched on request and external failures are reported
   assert.equal((await response.json()).content, '# External notes');
   assert.equal((await get(path + '/missing')).status, 502);
 });
+
+test('HTML preview is isolated, serves relative assets, and requires authentication to create', async t => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'pi-html-')));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, 'index.html'), '<html><h1>Example</h1></html>');
+  await writeFile(join(dir, 'style.css'), 'h1 { color: blue }');
+  await symlink('/etc/hosts', join(dir, 'escape.txt'));
+  const server = await startServer({ subscribe: () => () => {}, current: () => ({ session: { cwd: dir } }) });
+  t.after(() => server.close());
+  assert.equal((await fetch(`${server.origin}/api/file?path=index.html`)).status, 401);
+  const info = await (await fetch(`${server.origin}/api/file?path=index.html`, { headers: { Authorization: `Bearer ${server.token}` } })).json();
+  const url = new URL(info.htmlUrl, server.origin);
+  const page = await fetch(url);
+  assert.equal(page.status, 200);
+  assert.equal(await page.text(), info.content);
+  assert.match(page.headers.get('content-security-policy'), /sandbox allow-scripts;/);
+  assert.doesNotMatch(page.headers.get('content-security-policy'), /allow-same-origin/);
+  const css = await fetch(new URL('style.css', url), { headers: { Origin: 'null' } });
+  assert.equal(css.status, 200);
+  assert.equal(css.headers.get('content-type'), 'text/css');
+  assert.equal((await fetch(new URL('escape.txt', url))).status, 403);
+  assert.equal((await fetch(new URL('/html/unknown/index.html', url))).status, 404);
+});

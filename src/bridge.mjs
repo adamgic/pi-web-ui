@@ -58,7 +58,7 @@ export function createBridge(pi, { listSessions: discoverSessions = async () => 
     const displayCwd = ctx.cwd === home ? '~' : ctx.cwd.startsWith(home + sep) ? '~' + ctx.cwd.slice(home.length) : ctx.cwd;
     const firstPrompt = entries.find(entry => entry.type === 'message' && entry.message.role === 'user')?.message;
     return {
-      session: { displayCwd, created: ctx.sessionManager.getHeader()?.timestamp, id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, file: ctx.sessionManager.getSessionFile(), name: pi.getSessionName() || textContent(firstPrompt?.content).trim().slice(0, 160) || 'New session' },
+      session: { title: pi.getSessionName() || textContent(firstPrompt?.content).trim().slice(0, 160) || 'pi-web-ui', displayCwd, created: ctx.sessionManager.getHeader()?.timestamp, id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, file: ctx.sessionManager.getSessionFile(), name: pi.getSessionName() || textContent(firstPrompt?.content).trim().slice(0, 160) || 'New session' },
       entries, completed, streaming, tools: [...tools.values()], models,
       model: ctx.model ? { provider: ctx.model.provider, modelId: ctx.model.id } : undefined,
       thinkingLevel: pi.getThinkingLevel(), busy: !ctx.isIdle(), compacting,

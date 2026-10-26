@@ -77,3 +77,14 @@ test('both palettes meet 4.5:1 text contrast on UI and code backgrounds', async 
 test('language detection supports common file extensions', () => {
   for (const [file, language] of Object.entries({ 'script.py': 'python', 'config.JSON': 'json', 'module.mjs': 'javascript', 'types.ts': 'typescript', 'main.rs': 'rust', 'config.yml': 'yaml', 'unknown.xyz': 'plaintext' })) assert.equal(languageFor(file), language);
 });
+
+test('HTML tag nesting preserves markup and handles void tags and script text', () => {
+  const source = '<html><body><img src="a>b"><section>text</section><script>if (a < b) x = "<fake>";</script></body></html>';
+  const parts = nestingParts(source, 'xml');
+  assert.equal(parts.map(p => p.text).join(''), source);
+  assert.equal(levelOf(parts, '<img'), 2);
+  assert.equal(levelOf(parts, '<section>'), 2);
+  assert.equal(levelOf(parts, 'text'), 3);
+  assert.equal(levelOf(parts, 'if (a'), 3);
+  assert.equal(levelOf(parts, '</html>'), 0);
+});
