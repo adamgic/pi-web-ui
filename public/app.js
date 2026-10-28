@@ -1,10 +1,11 @@
 import { prose as renderProse } from './prose.js';
-import { usageOf, transcriptOf } from './view.js';
+import { usageOf, transcriptOf, formatDuration } from './view.js';
 
 const $ = id => document.getElementById(id);
 const fragment = new URLSearchParams(location.hash.slice(1));
 const token = fragment.get('token') || sessionStorage.getItem('pi-web-token');
 if (fragment.has('token')) { sessionStorage.setItem('pi-web-token', token); history.replaceState(null, '', location.pathname); }
+let timingReceivedAt = performance.now();
 let view, online = false, pending = false, expanded = false, lastTranscript = '';
 let localError = '', selectedConversation, submitting = false;
 const drafts = new Map();
@@ -117,7 +118,20 @@ function alerts() {
   $('session-error').textContent = localError;
   $('session-error').hidden = !localError;
 }
+function renderTiming() {
+  const timing = view?.timing;
+  const node = $('run-timing');
+  node.hidden = !timing || (!timing.running && timing.lastDurationMs == null);
+  if (node.hidden) return;
+  const parts = [];
+  if (timing.running) parts.push(`Elapsed ${formatDuration(timing.elapsedMs + (online ? performance.now() - timingReceivedAt : 0))}`);
+  if (timing.lastDurationMs != null) parts.push(`${timing.running ? 'Last duration' : 'Duration'} ${formatDuration(timing.lastDurationMs)}`);
+  node.textContent = parts.join(' · ');
+}
+setInterval(renderTiming, 1000);
 function render() {
+  timingReceivedAt = performance.now();
+  renderTiming();
   document.title = view.session.title || (view.session.name !== 'New session' && view.session.name) || 'pi-web-ui';
   const id = view.session.id;
   if (id !== selectedConversation) {
@@ -372,6 +386,10 @@ document.addEventListener('keydown', event => {
   if (event.key.toLowerCase() === 'o') { event.preventDefault(); $('expand').click(); }
 });
 function connection(connected, label) {
+  if (online && !connected && view?.timing?.running) {
+    view.timing.elapsedMs += performance.now() - timingReceivedAt;
+    timingReceivedAt = performance.now();
+  }
   online = connected; $('connection').textContent = label; $('connection-dot').classList.toggle('saved', connected); controls();
 }
 async function connect() {
