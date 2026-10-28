@@ -2,3 +2,4 @@ node_modules/
 *.tgz
 output/
 temp/
+.DS_Store

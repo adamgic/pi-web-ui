@@ -226,3 +226,10 @@ To enforce validation before merging, require these checks in the GitHub branch
 ruleset: `Syntax and tests (Node 22.19.0)`, `Syntax and tests (Node 24)`, and
 `Chromium browser checks`. Adding the workflow alone reports results but does not
 change branch protection settings.
+
+The status bar shows **Elapsed** while an agent run is active, and **Duration**
+when it finishes or stops. Thinking and tool execution are included. During the
+next run, **Last duration** retains the previous result. Timing comes from the
+server's monotonic clock and survives browser reloads/reconnections; switching
+sessions or restarting the extension clears it. Runs completed before timing
+was observed are not estimated from message timestamps. Compaction is not timed.

@@ -100,3 +100,37 @@ test('session metadata uses readable names and only abbreviates the actual home 
   pi.getSessionName = () => 'Named session';
   assert.equal(bridge.current().session.name, 'Named session');
 });
+
+test('run timing spans tools, survives snapshots and freezes on end or abort settlement', () => {
+  const { pi, ctx, state } = fixture();
+  let clock = 0;
+  const bridge = createBridge(pi, { now: () => clock });
+  bridge.update({ type: 'session_start' }, ctx);
+  assert.equal(bridge.current().timing.lastDurationMs, undefined);
+  bridge.update({ type: 'agent_start' }, ctx);
+  clock = 2500;
+  assert.equal(bridge.current().timing.elapsedMs, 2500);
+  bridge.update({ type: 'agent_start' }, ctx); // Duplicate start must not reset it.
+  clock = 5000;
+  bridge.update({ type: 'agent_end' }, ctx);
+  assert.equal(bridge.current().timing.lastDurationMs, 5000);
+  clock = 9000;
+  bridge.update({ type: 'agent_settled' }, ctx);
+  assert.equal(bridge.current().timing.lastDurationMs, 5000);
+  bridge.update({ type: 'agent_start' }, ctx);
+  assert.equal(bridge.current().timing.lastDurationMs, 5000);
+  clock = 11000;
+  bridge.update({ type: 'agent_settled' }, ctx);
+  assert.equal(bridge.current().timing.lastDurationMs, 2000);
+  state.id = 'other-session';
+  bridge.update({ type: 'session_start' }, ctx);
+  assert.equal(bridge.current().timing.lastDurationMs, undefined);
+  assert.equal(bridge.current().timing.running, false);
+});
+
+test('duration formatting handles seconds, minutes and hours', async () => {
+  const { formatDuration } = await import('../public/view.js');
+  assert.equal(formatDuration(0), '0s');
+  assert.equal(formatDuration(61999), '1m 1s');
+  assert.equal(formatDuration(3661000), '1h 1m 1s');
+});

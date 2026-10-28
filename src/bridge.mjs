@@ -6,8 +6,9 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 const copy = value => structuredClone(value);
 
 /** Adapts the public ExtensionAPI and ExtensionContext to browser snapshots. */
-export function createBridge(pi, { listSessions: discoverSessions = async () => [], changeSession } = {}) {
+export function createBridge(pi, { listSessions: discoverSessions = async () => [], changeSession, now = () => performance.now() } = {}) {
   let ctx;
+  let timingSession, startedAt, lastDurationMs;
   let streaming;
   let completed = [];
   let tools = new Map();
@@ -19,11 +20,18 @@ export function createBridge(pi, { listSessions: discoverSessions = async () => 
   const notice = message => { notices = [...notices.slice(-2), { level: 'error', message }]; publish(); };
 
   function update(event, context) {
+    const sessionId = context.sessionManager.getSessionId();
+    if (event.type === 'session_start' || timingSession !== sessionId) {
+      timingSession = sessionId; startedAt = undefined; lastDurationMs = undefined;
+    }
     if (event.type === 'session_start' || ctx?.sessionManager.getSessionId() !== context.sessionManager.getSessionId()) {
       streaming = undefined; completed = []; tools = new Map(); compacting = false; notices = []; closed = false;
     }
     ctx = context;
-    if (event.type === 'agent_start') { tools.clear(); notices = []; }
+    if (event.type === 'agent_start') { tools.clear(); notices = []; startedAt ??= now(); }
+    if (['agent_end', 'agent_settled'].includes(event.type) && startedAt !== undefined) {
+      lastDurationMs = Math.max(0, now() - startedAt); startedAt = undefined;
+    }
     if (event.type === 'message_start' || event.type === 'message_update') streaming = copy(event.message);
     if (event.type === 'message_end') {
       // Pi emits this event before appending the message to its session file.
@@ -59,6 +67,7 @@ export function createBridge(pi, { listSessions: discoverSessions = async () => 
     const firstPrompt = entries.find(entry => entry.type === 'message' && entry.message.role === 'user')?.message;
     return {
       session: { title: pi.getSessionName() || textContent(firstPrompt?.content).trim().slice(0, 160) || 'pi-web-ui', displayCwd, created: ctx.sessionManager.getHeader()?.timestamp, id: ctx.sessionManager.getSessionId(), cwd: ctx.cwd, file: ctx.sessionManager.getSessionFile(), name: pi.getSessionName() || textContent(firstPrompt?.content).trim().slice(0, 160) || 'New session' },
+      timing: { running: startedAt !== undefined, elapsedMs: startedAt === undefined ? 0 : Math.max(0, now() - startedAt), lastDurationMs },
       entries, completed, streaming, tools: [...tools.values()], models,
       model: ctx.model ? { provider: ctx.model.provider, modelId: ctx.model.id } : undefined,
       thinkingLevel: pi.getThinkingLevel(), busy: !ctx.isIdle(), compacting,

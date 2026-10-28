@@ -259,6 +259,9 @@ try {
   assert.equal(await evaluate("document.getElementById('prompt').selectionStart"), 5, 'Draft restores its saved caret');
   await evaluate("document.getElementById('prompt').value = ''");
   f.state.idle = false;
+  bridge.update({ type: 'agent_start' }, f.ctx);
+  await until(() => evaluate("document.getElementById('run-timing').textContent.startsWith('Elapsed ')"), 'live elapsed time');
+  await until(() => evaluate("!document.getElementById('run-timing').textContent.startsWith('Elapsed 0s')"), 'elapsed timer ticks');
   bridge.update({
     type: 'message_update', message: {
       role: 'assistant', content: [
@@ -309,12 +312,14 @@ try {
   bridge.update({ type: 'agent_end' }, f.ctx);
   await until(() => evaluate("!document.getElementById('compact').disabled"), 'idle controls');
   assert.equal(await evaluate("document.getElementById('status').textContent"), 'Ready');
+  assert.match(await evaluate("document.getElementById('run-timing').textContent"), /^Duration /);
   assert.equal(await evaluate("getComputedStyle(document.getElementById('status')).animationName"), 'none');
   await evaluate("document.getElementById('compact').click(); document.getElementById('compact-instructions').value = 'Keep decisions'; document.querySelector('#compact-form button[type=submit]').click()");
   await until(() => f.state.calls.some(c => c[0] === 'compact' && c[1] === 'Keep decisions'), 'compaction');
   f.state.compaction.onComplete({});
   await cdp('Page.reload');
   await until(() => evaluate("document.getElementById('connection')?.textContent === 'Connected' && document.querySelector('.tool-card')"), 'reload reconnect');
+  assert.match(await evaluate("document.getElementById('run-timing').textContent"), /^Duration /);
   assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2, 'reload must not replay prompts');
   await evaluate("document.getElementById('prompt').focus()");
   await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 });
