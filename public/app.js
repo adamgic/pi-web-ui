@@ -1,10 +1,12 @@
 import { prose as renderProse } from './prose.js';
 import { usageOf, transcriptOf, formatDuration } from './view.js';
+import { createExplorer } from './explorer.js';
 
 const $ = id => document.getElementById(id);
 const fragment = new URLSearchParams(location.hash.slice(1));
 const token = fragment.get('token') || sessionStorage.getItem('pi-web-token');
 if (fragment.has('token')) { sessionStorage.setItem('pi-web-token', token); history.replaceState(null, '', location.pathname); }
+const explorer = createExplorer({ token, copyPath: path => copyValue('Path', path) });
 let timingReceivedAt = performance.now();
 let view, online = false, pending = false, expanded = false, lastTranscript = '';
 let localError = '', selectedConversation, submitting = false;
@@ -143,6 +145,7 @@ function render() {
   }
 
   $('cwd').textContent = view.session.displayCwd || view.session.cwd;
+  explorer.setWorkingDirectory(view.session.cwd);
   $('session-model').textContent = view.model?.modelId || 'None selected';
   $('session-model').disabled = !view.model;
   $('session-name').textContent = view.session.name;

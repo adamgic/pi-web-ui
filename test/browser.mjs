@@ -63,10 +63,10 @@ try {
     if (message.method === 'Log.entryAdded' && ['warning', 'error'].includes(message.params.entry.level)) mediaDiagnostics.push({ event: 'browserLog', ...message.params.entry });
     if (message.method === 'Runtime.exceptionThrown') exceptions.push(message.params.exceptionDetails.text);
   };
-  const cdp = (method, params = {}) => new Promise((resolve, reject) => {
+  const cdp = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
     const id = ++next;
     const timer = setTimeout(() => { requests.delete(id); reject(new Error(`CDP timeout: ${method}`)); }, 10000);
-    requests.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }));
+    requests.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params, sessionId }));
   });
   const evaluate = async expression => {
     const result = await cdp('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
@@ -82,6 +82,117 @@ try {
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await cdp('Page.navigate', { url: server.url });
   await until(() => evaluate("document.getElementById('connection')?.textContent === 'Connected'"), 'UI connection');
+  const explorerRoot = `${profile}/explorer/root`;
+  await mkdir(`${explorerRoot}/empty`, { recursive: true });
+  await writeFile(`${explorerRoot}/My # Notes.md:12`, '# Explorer preview');
+  await writeFile(`${explorerRoot}/.hidden`, 'Hidden file');
+  await writeFile(`${profile}/explorer/outside.txt`, 'Outside working directory');
+  f.ctx.cwd = explorerRoot;
+  bridge.update({ type: 'session_start' }, f.ctx);
+  await until(() => evaluate("document.getElementById('cwd').textContent.endsWith('/explorer/root')"), 'explorer working directory');
+  const click = id => evaluate(`document.getElementById(${JSON.stringify(id)}).click()`);
+  const atDirectory = path => until(() => evaluate(`document.getElementById('explorer-path').textContent === ${JSON.stringify(path)} && document.getElementById('explorer-entries').getAttribute('aria-busy') === 'false'`), `explorer at ${path}`);
+  assert.equal(await evaluate("document.getElementById('file-explorer').hidden"), true);
+  await click('explorer-toggle');
+  await atDirectory(explorerRoot);
+  assert.equal(await evaluate("document.getElementById('explorer-toggle').getAttribute('aria-expanded')"), 'true');
+  assert.ok(await evaluate("document.getElementById('explorer-entries').textContent.includes('.hidden')"));
+  await evaluate("document.querySelector('#explorer-entries .directory').click()");
+  await atDirectory(`${explorerRoot}/empty`);
+  assert.equal(await evaluate("document.getElementById('explorer-status').textContent"), 'This directory is empty.');
+  await click('explorer-toggle');
+  assert.equal(await evaluate("document.getElementById('file-explorer').hidden"), true);
+  await click('explorer-toggle');
+  await atDirectory(`${explorerRoot}/empty`);
+  await click('explorer-up');
+  await atDirectory(explorerRoot);
+  await click('explorer-up');
+  await atDirectory(`${profile}/explorer`);
+  assert.ok(await evaluate("document.getElementById('explorer-entries').textContent.includes('outside.txt')"));
+  await click('explorer-home');
+  await atDirectory(explorerRoot);
+  await writeFile(`${explorerRoot}/added.txt`, 'New file');
+  await click('explorer-refresh');
+  await until(() => evaluate("document.getElementById('explorer-entries').textContent.includes('added.txt')"), 'refreshed explorer');
+  await cdp('Emulation.setFocusEmulationEnabled', { enabled: true });
+  await cdp('Browser.grantPermissions', { origin: server.origin, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  const hover = async selector => {
+    const point = await evaluate(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); node.scrollIntoView({ block: 'nearest' }); const r = node.getBoundingClientRect(); return { x: r.x + Math.min(10, r.width / 2), y: r.y + r.height / 2 }; })()`);
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+  };
+  await hover('#explorer-entries .directory');
+  await pause(200);
+  assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), true);
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 80 });
+  await pause(700);
+  assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), true);
+  for (const [selector, path] of [
+    ['#explorer-entries .directory', `${explorerRoot}/empty`],
+    ['#explorer-entries a[href*="My"]', `${explorerRoot}/My # Notes.md:12`],
+    ['#explorer-path [aria-current]', explorerRoot],
+  ]) {
+    await hover(selector);
+    await pause(200);
+    assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), true);
+    await until(() => evaluate(`!document.getElementById('explorer-path-info').hidden && document.getElementById('explorer-path-info-text').textContent === ${JSON.stringify(path)}`), 'full path on hover');
+    await hover('#explorer-path-info-text');
+    await pause(300);
+    assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), false);
+    assert.equal(await evaluate("getComputedStyle(document.getElementById('explorer-path-info-text')).cursor"), 'copy');
+    assert.equal(await evaluate("document.querySelectorAll('#explorer-path-info button').length"), 0);
+    await cdp('Runtime.evaluate', { expression: "document.getElementById('explorer-path-info').click()", userGesture: true });
+    await until(async () => await evaluate('navigator.clipboard.readText()') === path, 'copy exact path');
+    await atDirectory(explorerRoot);
+    await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/explorer-path-popover.png`, Buffer.from(result.data, 'base64')));
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 80 });
+    await until(() => evaluate("document.getElementById('explorer-path-info').hidden"), 'popover dismisses on mouse leave');
+  }
+  // Keyboard users can reach the copy action, and Escape must not abort Pi.
+  await evaluate("document.querySelector('#explorer-path [aria-current]').focus()");
+  await until(() => evaluate("!document.getElementById('explorer-path-info').hidden"), 'keyboard path information');
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  assert.equal(await evaluate("document.activeElement.id"), 'explorer-path-info');
+  await cdp('Runtime.evaluate', { expression: "navigator.clipboard.writeText('before keyboard copy')", awaitPromise: true, userGesture: true });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await until(async () => await evaluate('navigator.clipboard.readText()') === explorerRoot, 'keyboard tooltip copy');
+  const abortsBefore = f.state.calls.filter(call => call[0] === 'abort').length;
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), true);
+  assert.equal(await evaluate("document.activeElement.getAttribute('aria-current')"), 'location');
+  assert.equal(f.state.calls.filter(call => call[0] === 'abort').length, abortsBefore);
+  await evaluate("[...document.querySelectorAll('#explorer-path button')].find(b => b.textContent === 'explorer').click()");
+  await atDirectory(`${profile}/explorer`);
+  await evaluate("document.querySelector('#explorer-path button').click()");
+  await atDirectory('/');
+  assert.equal(await evaluate("document.getElementById('explorer-up').disabled"), true);
+  await click('explorer-home');
+  await atDirectory(explorerRoot);
+  await until(() => evaluate("document.querySelectorAll('#toasts .toast').length === 0"), 'path copy notices expire');
+  results.push({ test: 'Delayed path tooltips, cancelled brief hovers, click-to-copy with copy cursor, keyboard access, Escape dismissal and ancestor/root breadcrumbs', status: 'pass' });
+  // Actual file click opens the existing preview in another tab, including literal :12 names.
+  const previewUrl = await evaluate("[...document.querySelectorAll('#explorer-entries a')].find(a => a.textContent === 'My # Notes.md:12').href");
+  await cdp('Runtime.evaluate', { expression: "[...document.querySelectorAll('#explorer-entries a')].find(a => a.textContent === 'My # Notes.md:12').click()", userGesture: true });
+  const target = await until(async () => (await cdp('Target.getTargets')).targetInfos.find(target => target.url.split('#')[0] === previewUrl.split('#')[0]), 'explorer preview tab');
+  const attached = await cdp('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+  await until(async () => (await cdp('Runtime.evaluate', { expression: "document.getElementById('content')?.textContent", returnByValue: true }, attached.sessionId)).result.value?.includes('# Explorer preview'), 'explorer preview content');
+  await cdp('Target.closeTarget', { targetId: target.targetId });
+  // Failed navigation leaves the current directory usable, and refresh can retry.
+  await evaluate(`window.explorerFetch = window.fetch; window.fetch = (url, options) => String(url).startsWith('/api/directory?') ? Promise.resolve(new Response(JSON.stringify({ error: 'This directory cannot be read.' }), { status: 403 })) : window.explorerFetch(url, options)`);
+  await click('explorer-up');
+  await until(() => evaluate("document.getElementById('explorer-status').textContent === 'This directory cannot be read.'"), 'explorer navigation failure');
+  await atDirectory(explorerRoot);
+  await evaluate('window.fetch = window.explorerFetch; delete window.explorerFetch');
+  await click('explorer-refresh');
+  await atDirectory(explorerRoot);
+  await viewport(1024, 500);
+  assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth && document.documentElement.scrollHeight <= innerHeight'));
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/file-explorer.png`, Buffer.from(result.data, 'base64')));
+  await viewport(1440, 1000);
+  await click('explorer-toggle');
+  f.ctx.cwd = '/example/project';
+  bridge.update({ type: 'session_start' }, f.ctx);
+  await until(() => evaluate("document.getElementById('cwd').textContent === '/example/project'"), 'restore test working directory');
+  results.push({ test: 'Explorer folder navigation, parent outside cwd, collapse persistence, return to cwd, refresh, errors and actual file preview click', status: 'pass' });
   const links = await evaluate(`(async () => {
     const { prose } = await import('/prose.js');
     const node = prose('[Notes](<docs/My Notes.md>) README.md:12 https://example.com \`src/app.js\`\\n<script>bad()</script>', { token: 'test', cwd: '/example/project', checkFiles: false });
@@ -345,6 +456,44 @@ try {
   await evaluate("document.getElementById('prompt').value = '/login'; document.getElementById('send').click()");
   await until(() => evaluate("document.getElementById('alerts').textContent.includes('terminal')"), 'terminal-only command guidance');
   assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2);
+  const section = '6-tools-delegation-policies-and-extensibility';
+  const filler = Array(35).fill('Paragraph for anchor scrolling.\n').join('\n');
+  const tokenlessPreview = `${server.origin}/preview.html?${new URLSearchParams({ path: 'root/other notes.md', cwd: `${profile}/explorer` })}#destination`;
+  await writeFile(`${explorerRoot}/anchors.md`, `# Start\n\n[Jump](#${section})\n\n[Other file](other%20notes.md#destination)\n\n[Tokenless preview](${tokenlessPreview})\n\n${filler}\n## 6. Tools, Delegation, Policies, and Extensibility\n\n[Back to start](#start)\n\n### Repeated\n\n### Repeated\n\n${filler}`);
+  await writeFile(`${explorerRoot}/other notes.md`, `# Other document\n\n${filler}\n## Destination\n\nAuthenticated destination.\n\n${filler}`);
+  // Start without stored authentication, using the exact legacy fragment format.
+  await evaluate("sessionStorage.removeItem('pi-web-token')");
+  await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${explorerRoot}/anchors.md` })}#${section}#token=${server.token}` });
+  await until(() => evaluate(`Boolean(document.getElementById(${JSON.stringify(section)})) && scrollY > 0`), 'legacy authenticated anchor preview');
+  assert.equal(await evaluate('location.hash'), `#${section}`);
+  assert.equal(await evaluate("sessionStorage.getItem('pi-web-token')"), server.token);
+  assert.ok(await evaluate("Boolean(document.getElementById('repeated') && document.getElementById('repeated-1'))"));
+  await until(() => evaluate("document.querySelectorAll('#content [data-file-candidate]').length === 0"), 'preview file links verified');
+  const pageCount = (await cdp('Target.getTargets')).targetInfos.filter(target => target.type === 'page').length;
+  await evaluate("[...document.querySelectorAll('#content a')].find(a => a.textContent === 'Back to start').click()");
+  await until(() => evaluate("location.hash === '#start' && document.getElementById('start').getBoundingClientRect().top < 100"), 'same-document section link');
+  assert.equal((await cdp('Target.getTargets')).targetInfos.filter(target => target.type === 'page').length, pageCount);
+  await evaluate("[...document.querySelectorAll('#content a')].find(a => a.textContent === 'Jump').click()");
+  await until(() => evaluate(`location.hash === '#${section}'`), 'section jump');
+  await cdp('Page.reload');
+  await until(() => evaluate(`Boolean(document.getElementById('${section}')) && scrollY > 0`), 'anchor survives reload');
+  await evaluate("document.getElementById('toggle').click(); document.getElementById('toggle').click()");
+  await until(() => evaluate(`document.getElementById('${section}').getBoundingClientRect().top < 100`), 'anchor survives source toggle');
+  for (const label of ['Other file', 'Tokenless preview']) {
+    await until(() => evaluate(`Boolean([...document.querySelectorAll('#content a[href]')].find(a => a.textContent === ${JSON.stringify(label)}))`), `clickable ${label}`);
+    const destination = await evaluate(`[...document.querySelectorAll('#content a')].find(a => a.textContent === ${JSON.stringify(label)}).href`);
+    assert.equal(new URL(destination).searchParams.has('token'), false);
+    assert.equal(new URLSearchParams(new URL(destination).hash.slice(1)).get('anchor'), 'destination');
+    await cdp('Runtime.evaluate', { expression: `[...document.querySelectorAll('#content a')].find(a => a.textContent === ${JSON.stringify(label)}).click()`, userGesture: true });
+    const tab = await until(async () => (await cdp('Target.getTargets')).targetInfos.find(target => target.url.split('#')[0] === destination.split('#')[0]), `${label} tab`);
+    const attached = await cdp('Target.attachToTarget', { targetId: tab.targetId, flatten: true });
+    const inTab = async expression => (await cdp('Runtime.evaluate', { expression, returnByValue: true }, attached.sessionId)).result.value;
+    await until(() => inTab("Boolean(document.getElementById('destination')) && scrollY > 0"), `${label} authenticated heading`);
+    assert.equal(await inTab('location.hash'), '#destination');
+    assert.equal(await inTab("sessionStorage.getItem('pi-web-token')"), server.token);
+    await cdp('Target.closeTarget', { targetId: tab.targetId });
+  }
+  results.push({ test: 'Legacy anchor/token links, heading IDs, same-tab TOC links, reload/source toggle, authenticated cross-file and tokenless preview links in new tabs', status: 'pass' });
   const mathFixture = await readFile(`${root}test/fixtures/tidal-forces.md`, 'utf8');
   const expectedMath = [...mathFixture.matchAll(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g)].length;
   await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/tidal-forces.md` })}#token=${server.token}` });
