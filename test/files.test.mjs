@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, symlink, rm, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse } from 'node:path';
 import { startServer } from '../src/server.mjs';
 import { linkTarget } from '../public/prose.js';
+import { previewLink, readPreviewFragment } from '../public/preview-links.js';
 
 test('link destinations preserve web URLs and encode local paths safely', () => {
   assert.equal(linkTarget('https://example.com/a?q=b'), 'https://example.com/a?q=b');
@@ -12,6 +13,38 @@ test('link destinations preserve web URLs and encode local paths safely', () => 
   const url = new URL(linkTarget('file:///tmp/My%20Notes.md', { token: 'secret', cwd: '/tmp' }), 'http://localhost');
   assert.equal(url.searchParams.get('path'), '/tmp/My Notes.md');
   assert.equal(url.hash, '#token=secret');
+});
+
+test('preview tokens and anchors round trip independently, including legacy double-hash links', () => {
+  const anchor = '6-tools-delegation-policies-and-extensibility';
+  for (const hash of [`#${anchor}#token=secret`, `#token=secret#${anchor}`, `#token=secret&anchor=${anchor}`]) {
+    assert.deepEqual(readPreviewFragment(hash), { token: 'secret', anchor });
+  }
+  const url = new URL(previewLink({ path: '/tmp/file #1.md', literal: '1' }, 'secret', 'café & tools'), 'http://localhost');
+  assert.deepEqual(readPreviewFragment(url.hash), { token: 'secret', anchor: 'café & tools' });
+  assert.equal(url.searchParams.get('path'), '/tmp/file #1.md');
+  assert.ok(!url.search.includes('secret'));
+  assert.deepEqual(readPreviewFragment('#caf%C3%A9'), { token: '', anchor: 'café' });
+  assert.doesNotThrow(() => readPreviewFragment('#bad%encoding'));
+});
+
+test('document links separate anchors from paths and authenticate only local preview URLs', () => {
+  const options = { token: 'secret', cwd: '/workspace/docs', origin: 'http://localhost:1234' };
+  for (const [value, path] of [['other%20notes.md#section', 'other notes.md'], ['file:///tmp/a%23b.md#section', '/tmp/a#b.md'], ['https://example.com/notes.md#section', 'https://example.com/notes.md']]) {
+    const url = new URL(linkTarget(value, options), options.origin);
+    assert.equal(url.searchParams.get('path'), path);
+    assert.deepEqual(readPreviewFragment(url.hash), { token: 'secret', anchor: 'section' });
+  }
+  for (const value of ['/preview.html?path=notes.md&cwd=%2Fother#section', 'http://localhost:1234/preview.html?path=notes.md&cwd=%2Fother#section#token=old']) {
+    const url = new URL(linkTarget(value, options), options.origin);
+    assert.equal(url.searchParams.get('path'), 'notes.md');
+    assert.equal(url.searchParams.get('cwd'), '/other');
+    assert.deepEqual(readPreviewFragment(url.hash), { token: 'secret', anchor: 'section' });
+  }
+  assert.equal(linkTarget('#section', { ...options, cwd: 'https://example.com/notes.md' }), '#section');
+  for (const url of ['https://example.com/page#section', 'https://example.com/preview.html?path=notes.md#section']) assert.equal(linkTarget(url, options), url);
+  const relative = new URL(linkTarget('other.md#section', { ...options, cwd: 'https://example.com/docs/start.md' }), options.origin);
+  assert.equal(relative.searchParams.get('path'), 'https://example.com/docs/other.md');
 });
 
 test('file previews require authentication and allow reads outside the working directory including symlinks', async t => {
@@ -55,6 +88,48 @@ test('external Markdown is fetched on request and external failures are reported
   assert.equal(response.status, 200);
   assert.equal((await response.json()).content, '# External notes');
   assert.equal((await get(path + '/missing')).status, 502);
+});
+
+test('directory browsing starts at cwd, traverses parents and symlinks, and preserves literal file names', async t => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'pi-explorer-')));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const root = join(dir, 'root');
+  await mkdir(join(root, 'folder'), { recursive: true });
+  await mkdir(join(dir, 'outside'));
+  for (const name of ['.hidden', 'a # notes.txt', 'note:12']) await writeFile(join(root, name), name);
+  await writeFile(join(dir, 'outside', 'external.txt'), 'Outside');
+  await symlink(join(dir, 'outside'), join(root, 'linked-folder'));
+  await symlink(join(dir, 'outside', 'external.txt'), join(root, 'linked-file'));
+  await symlink(join(dir, 'missing'), join(root, 'broken'));
+  const server = await startServer({ subscribe: () => () => {}, current: () => ({ session: { cwd: root } }) });
+  t.after(() => server.close());
+  const headers = { Authorization: `Bearer ${server.token}` };
+  const get = path => fetch(`${server.origin}/api/directory${path === undefined ? '' : `?${new URLSearchParams({ path })}`}`, { headers });
+  assert.equal((await fetch(`${server.origin}/api/directory`)).status, 401);
+  assert.equal((await fetch(`${server.origin}/api/directory`, { headers: { ...headers, Origin: 'https://example.com' } })).status, 403);
+  const listing = await (await get()).json();
+  assert.equal(listing.path, root);
+  assert.equal(listing.parent, dir);
+  assert.deepEqual(listing.entries.slice(0, 2).map(entry => entry.name), ['folder', 'linked-folder']);
+  assert.equal(listing.entries.find(entry => entry.name === 'broken').type, 'unavailable');
+  assert.equal(listing.entries.find(entry => entry.name === 'linked-file').type, 'file');
+  for (const entry of listing.entries.filter(entry => entry.type === 'file')) {
+    const response = await fetch(`${server.origin}/api/file?${new URLSearchParams({ path: entry.path, literal: '1' })}`, { headers });
+    assert.equal(response.status, 200, entry.name);
+    assert.equal((await response.json()).content, entry.name === 'linked-file' ? 'Outside' : entry.name);
+  }
+  assert.deepEqual((await (await get('folder')).json()).entries, []);
+  assert.equal((await (await get('..')).json()).path, dir);
+  assert.equal((await (await get('../outside')).json()).entries[0].name, 'external.txt');
+  const linked = await (await get('linked-folder')).json();
+  assert.equal(linked.entries[0].name, 'external.txt');
+  assert.equal(linked.parent, root);
+  assert.equal((await (await get(parse(root).root)).json()).parent, null);
+  assert.equal((await (await get(root)).json()).path, root);
+  assert.equal((await get('missing')).status, 404);
+  assert.equal((await get('.hidden')).status, 400);
+  assert.equal((await get('')).status, 400);
+  assert.equal((await get('\0')).status, 400);
 });
 
 test('HTML preview is isolated, serves relative assets, and requires authentication to create', async t => {

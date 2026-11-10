@@ -2,9 +2,9 @@ import { htmlPreviews } from './html-preview.mjs';
 import { mediaType, serveMedia } from './media.mjs';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { realpath, stat, readFile } from 'node:fs/promises';
+import { realpath, stat, readFile, readdir } from 'node:fs/promises';
 
-import { resolve } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
 const assets = new Map([
@@ -12,6 +12,7 @@ const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/preview.html', ['preview.html', 'text/html; charset=utf-8']],
   ['/preview.js', ['preview.js', 'text/javascript; charset=utf-8']],
+  ['/preview-links.js', ['preview-links.js', 'text/javascript; charset=utf-8']],
   ['/preview.css', ['preview.css', 'text/css; charset=utf-8']],
   ['/highlighting.js', ['highlighting.js', 'text/javascript; charset=utf-8']],
   ['/nesting.js', ['nesting.js', 'text/javascript; charset=utf-8']],
@@ -21,6 +22,7 @@ const assets = new Map([
   ['/vendor/katex/katex.mjs', ['vendor/katex/katex.mjs', 'text/javascript; charset=utf-8']],
   ['/prose.js', ['prose.js', 'text/javascript; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/explorer.js', ['explorer.js', 'text/javascript; charset=utf-8']],
   ['/view.js', ['view.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
 ]);
@@ -104,8 +106,9 @@ export async function startServer(bridge, { port = 0 } = {}) {
       }
       if (url.pathname.startsWith('/api/')) {
         if (!authorized(req)) throw error(401, 'Open the full launch URL printed in the terminal.');
-        const localPath = value => {
+        const localPath = (value, literal = false) => {
           if (typeof value !== 'string' || !value || value.includes('\0')) throw error(400, 'Invalid file path.');
+          if (literal) return resolve(url.searchParams.get('cwd') || bridge.current().session.cwd, value);
           if (value.startsWith('file:')) {
             const file = new URL(value);
             if (file.hostname && file.hostname !== 'localhost') throw error(400, 'Invalid file host.');
@@ -115,11 +118,32 @@ export async function startServer(bridge, { port = 0 } = {}) {
           if (value.startsWith('~/')) value = resolve(homedir(), value.slice(2));
           return resolve(url.searchParams.get('cwd') || bridge.current().session.cwd, value);
         };
+        if (req.method === 'GET' && url.pathname === '/api/directory') {
+          const path = localPath(url.searchParams.get('path') ?? '.', true);
+          let children;
+          try { children = await readdir(path, { withFileTypes: true }); }
+          catch (e) {
+            if (e.code === 'ENOTDIR') throw error(400, 'This path is not a directory.');
+            if (e.code === 'EACCES' || e.code === 'EPERM') throw error(403, 'This directory cannot be read.');
+            throw error(404, 'Directory not found or unavailable.');
+          }
+          const entries = await Promise.all(children.map(async child => {
+            const entryPath = join(path, child.name);
+            let info = child;
+            if (child.isSymbolicLink()) {
+              try { info = await stat(entryPath); } catch { info = undefined; }
+            }
+            const type = !info ? 'unavailable' : info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other';
+            return { name: child.name, path: entryPath, type, symlink: child.isSymbolicLink() };
+          }));
+          entries.sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || a.name.localeCompare(b.name, undefined, { numeric: true }) || a.name.localeCompare(b.name));
+          json(res, 200, { path, parent: dirname(path) === path ? null : dirname(path), entries }); return;
+        }
         if (req.method === 'POST' && url.pathname === '/api/files/exists') {
           const input = await body(req);
           if (!Array.isArray(input?.paths) || input.paths.length > 256) throw error(400, 'Expected up to 256 paths.');
           const exists = await Promise.all(input.paths.map(async value => {
-            try { return (await stat(localPath(value))).isFile(); } catch { return false; }
+            try { return (await stat(localPath(value, url.searchParams.get('literal') === '1'))).isFile(); } catch { return false; }
           }));
           json(res, 200, { exists }); return;
         }
@@ -140,7 +164,7 @@ export async function startServer(bridge, { port = 0 } = {}) {
             }
             bytes = Buffer.concat(chunks);
           } else {
-            const candidate = localPath(requested);
+            const candidate = localPath(requested, url.searchParams.get('literal') === '1');
             let info;
             try { path = await realpath(candidate); info = await stat(path); }
             catch { throw error(404, 'File not found or unavailable.'); }

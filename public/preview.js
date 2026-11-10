@@ -1,10 +1,18 @@
 import { highlightedCode, languageFor, savedHighlightMode, saveHighlightMode, colorNames } from './highlighting.js';
 import { prose } from './prose.js';
+import { readPreviewFragment } from './preview-links.js';
 const params = new URLSearchParams(location.search);
-const token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('pi-web-token');
+const fragment = readPreviewFragment(location.hash);
+const token = fragment.token || sessionStorage.getItem('pi-web-token');
 if (token) sessionStorage.setItem('pi-web-token', token);
-history.replaceState(null, '', location.pathname + location.search);
+history.replaceState(null, '', location.pathname + location.search + (fragment.anchor ? `#${encodeURIComponent(fragment.anchor)}` : ''));
 const content = document.getElementById('content');
+function scrollToAnchor() {
+  const { anchor } = readPreviewFragment(location.hash);
+  const heading = [...content.querySelectorAll('[id]')].find(node => node.id === anchor);
+  heading?.scrollIntoView();
+}
+window.addEventListener('hashchange', scrollToAnchor);
 try {
   const response = await fetch(`/api/file?${params}`, { headers: { Authorization: `Bearer ${token}` } });
   const file = await response.json();
@@ -41,10 +49,11 @@ try {
       else if (isHtml) {
         const frame = document.createElement('iframe');
         frame.className = 'html-preview'; frame.title = 'Rendered HTML';
-        frame.setAttribute('sandbox', 'allow-scripts'); frame.src = file.htmlUrl;
+        frame.setAttribute('sandbox', 'allow-scripts'); frame.src = file.htmlUrl + location.hash;
         content.replaceChildren(frame);
       }
-      else content.replaceChildren(prose(file.content, { token, cwd: remote ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) }));
+      else content.replaceChildren(prose(file.content, { token, cwd: remote ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) || '/', headingAnchors: true }));
+      if (!source) requestAnimationFrame(scrollToAnchor);
     };
     mode.onchange = () => { saveHighlightMode(mode.value); render(); };
     const toggle = document.getElementById('toggle');

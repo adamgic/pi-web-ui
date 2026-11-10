@@ -83,6 +83,8 @@ The browser displays the active session branch, streaming responses and reasonin
 
 The sidebar shows the full working directory (with the home prefix shortened to `~`), session name or first prompt, creation time, current-branch message count, provider/model, and session-file path. The model name, session name, and working directory are clickable to copy; the directory copies its full path. Session details sit below the always-visible model name and start collapsed. Click the arrow or **Session details** label to expand or collapse them. The model is not repeated inside the details. Only the session ID shows a full-value preview on hover or focus. Click any detail value to copy it. Copy feedback appears as yellow, orange-bordered toasts at the top left for three seconds; multiple notices stack and fade away in order. Model usage includes input/output tokens, cache reads/writes, context usage and capacity, and estimated cost. The sidebar scrolls independently in short windows. Ready, disconnected, and animated thinking status share the same text size above the prompt.
 
+Click **WORKING DIRECTORY** to show or hide the file explorer. It starts in the session working directory; click folders to browse, **↑ Up** to visit a parent (including outside the working directory), and **Working directory** to return in one click. Each component of the current path is a clickable breadcrumb, including the filesystem root. Hover a file, folder, or breadcrumb for about 650 ms to see its full path in a compact tooltip below the pointer. Hover the tooltip to see the copy cursor, then click anywhere on it to copy the path. Keyboard users can focus an item, wait for its tooltip, and press Tab then Enter or Space to copy; Escape dismisses the tooltip. Hiding and reopening the explorer preserves its current folder and scroll position during the page session. **↻** refreshes the listing. Files open in the existing preview in a new tab. Hidden files and symbolic links are included; unavailable links and special files cannot be opened. Browsing does not change Pi’s working directory.
+
 Prompt history comes from the active session and includes prompts accepted from this tab that are still queued. Switching history items preserves the cursor's character column, clamped to the destination line's length. Up enters the last line; Down enters the first line. While browsing, edits to recalled prompts are kept for that navigation pass; returning to your draft restores the original unsent text and saved cursor position. History is held steady during navigation so streaming updates do not move your position. Modified arrow keys retain their normal text-editing behavior.
 
 Light and dark appearance follow the OS/browser preference, including live changes. The page fits normal window sizes; the transcript scrolls within its panel. At widths of 440px or less, or heights of 560px or less, vertical page scrolling is enabled.
@@ -150,6 +152,15 @@ Response links open in a new tab. Explicit Markdown links, bare HTTP(S) URLs,
 file paths, and filenames in inline code are clickable. Relative files resolve
 against the session working directory. Use `[label](<path with spaces.md>)` for
 paths containing spaces.
+
+Markdown headings have section anchors, including unique IDs for repeated headings.
+Table-of-contents links such as `[Tools](#tools)` scroll within the current preview;
+`[Tools](other.md#tools)` opens the other file at that heading in a new tab.
+Preview links carry authentication and the section separately as
+`#token=…&anchor=tools`. Once loaded, the token moves to tab storage and the URL
+keeps only `#tools`, so section navigation and reloads continue to work.
+Legacy `#tools#token=…` links are also accepted. Links to another preview on the
+same server receive the current token automatically; external website links do not.
 
 Local `.md` and `.markdown` files open in the built-in Markdown preview with a
 source toggle; no browser extension is required. The lightweight renderer supports
