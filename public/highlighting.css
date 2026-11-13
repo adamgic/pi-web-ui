@@ -19,6 +19,7 @@
   border-radius: 10px; padding: 20px; line-height: 1.65; font-size: 13px;
 }
 .source-code code { color: inherit; background: none; padding: 0; font-size: inherit; }
+.file-preview .code-block>.source-code { padding-right: 50px; }
 .source-code .hljs-keyword, .source-code .hljs-selector-tag, .source-code .hljs-literal { color: var(--nest-purple); }
 .source-code .hljs-string, .source-code .hljs-regexp, .source-code .hljs-addition { color: var(--nest-green); }
 .source-code .hljs-number, .source-code .hljs-symbol, .source-code .hljs-bullet { color: var(--nest-orange); }

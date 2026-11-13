@@ -120,6 +120,22 @@ try {
     const point = await evaluate(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); node.scrollIntoView({ block: 'nearest' }); const r = node.getBoundingClientRect(); return { x: r.x + Math.min(10, r.width / 2), y: r.y + r.height / 2 }; })()`);
     await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
   };
+  const verifyCodeCopy = async (selector, expected) => {
+    await evaluate('document.activeElement.blur()');
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 10 });
+    // Headless Linux can report hover:none, just like a touch device. The UI
+    // deliberately leaves copy controls visible in that mode (style.css).
+    const noHover = await evaluate("matchMedia('(hover: none)').matches");
+    const idleOpacity = noHover ? '1' : '0';
+    await until(() => evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)}).querySelector('.copy-code')).opacity === '${idleOpacity}'`), noHover ? 'code copy visible without hover' : 'code copy hidden until hover');
+    if (!noHover) {
+      const point = await evaluate(`(() => { const block = document.querySelector(${JSON.stringify(selector)}); block.scrollIntoView({ block: 'start' }); const r = block.getBoundingClientRect(); return { x: r.x + 15, y: r.y + Math.min(20, r.height / 2) }; })()`);
+      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+    }
+    await until(() => evaluate(`(() => { const style = getComputedStyle(document.querySelector(${JSON.stringify(selector)}).querySelector('.copy-code')); return style.opacity === '1' && style.pointerEvents === 'auto'; })()`), 'code copy visible and clickable');
+    await cdp('Runtime.evaluate', { expression: `document.querySelector(${JSON.stringify(selector)}).querySelector('.copy-code').click()`, userGesture: true });
+    await until(async () => await evaluate('navigator.clipboard.readText()') === expected, 'complete code copied exactly');
+  };
   await hover('#explorer-entries .directory');
   await pause(200);
   assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), true);
@@ -373,10 +389,13 @@ try {
   bridge.update({ type: 'agent_start' }, f.ctx);
   await until(() => evaluate("document.getElementById('run-timing').textContent.startsWith('Elapsed ')"), 'live elapsed time');
   await until(() => evaluate("!document.getElementById('run-timing').textContent.startsWith('Elapsed 0s')"), 'elapsed timer ticks');
+  const chatSnippet = 'function greet(name) {\n\treturn `<Hello, ${name}>`;\n}\n\n// café\n';
+  const unfinishedSnippet = 'echo "still streaming"';
+  const responseMarkdown = `## Inspecting the project\nThe browser shares this Pi session.\n\n\`\`\`js\n${chatSnippet}\`\`\`\n\n\`\`\`sh\n${unfinishedSnippet}`;
   bridge.update({
     type: 'message_update', message: {
       role: 'assistant', content: [
-        { type: 'text', text: '## Inspecting the project\nThe browser shares this Pi session.' },
+        { type: 'text', text: responseMarkdown },
         { type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'src/main.ts' } },
       ]
     }
@@ -386,7 +405,10 @@ try {
   assert.equal(await evaluate("document.getElementById('expand').textContent"), 'Expand tool details');
   assert.ok(await evaluate("Math.abs(document.getElementById('expand').getBoundingClientRect().top + document.getElementById('expand').offsetHeight / 2 - document.getElementById('status').getBoundingClientRect().top - document.getElementById('status').offsetHeight / 2) < 2"));
   await evaluate("document.querySelector('.copy-response').click()");
-  await until(async () => (await evaluate('navigator.clipboard.readText()')) === '## Inspecting the project\nThe browser shares this Pi session.', 'copy original response Markdown');
+  await until(async () => (await evaluate('navigator.clipboard.readText()')) === responseMarkdown, 'copy original response Markdown');
+  await verifyCodeCopy('.message.assistant .code-block:first-of-type', chatSnippet);
+  await verifyCodeCopy('.message.assistant .code-block:last-child', unfinishedSnippet);
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/chat-code-copy.png`, Buffer.from(result.data, 'base64')));
   results.push({ test: 'Copy response preserves raw Markdown; tool toggle has no shortcut hint and aligns with status', status: 'pass' });
 
   await until(() => evaluate("document.getElementById('status').textContent === 'Thinking…'"), 'thinking indicator');
@@ -401,6 +423,7 @@ try {
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }, { name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await evaluate("document.getElementById('expand').click()");
   assert.equal(await evaluate("document.querySelector('.tool-card').open"), true);
+  await verifyCodeCopy('.tool-body .code-block:last-child', 'export function main() {}');
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/desktop-active.png`, Buffer.from(result.data, 'base64')));
   for (const theme of ['dark', 'light']) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
@@ -494,6 +517,31 @@ try {
     await cdp('Target.closeTarget', { targetId: tab.targetId });
   }
   results.push({ test: 'Legacy anchor/token links, heading IDs, same-tab TOC links, reload/source toggle, authenticated cross-file and tokenless preview links in new tabs', status: 'pass' });
+  const snippetFile = `${explorerRoot}/code-snippets.md`;
+  await writeFile(snippetFile, `# Code snippets\n\n\`\`\`js\n${chatSnippet}\`\`\`\n\n\`\`\`sh\n${unfinishedSnippet}\n\`\`\``);
+  await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: snippetFile })}#token=${server.token}` });
+  await until(() => evaluate("document.querySelectorAll('#content .copy-code').length === 2"), 'Markdown snippet copy controls');
+  await verifyCodeCopy('#content .code-block:first-of-type', chatSnippet);
+  await verifyCodeCopy('#content .code-block:last-child', unfinishedSnippet + '\n');
+  // Exercise the no-hover branch on every platform, including desktop macOS.
+  await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+  try {
+    assert.equal(await evaluate("matchMedia('(hover: none)').matches"), true);
+    await verifyCodeCopy('#content .code-block:first-of-type', chatSnippet);
+    await verifyCodeCopy('#content .code-block:last-child', unfinishedSnippet + '\n');
+    results.push({ test: 'No-hover copy controls stay visible and copy complete snippets without pointer hover', status: 'pass' });
+  } finally {
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+  }
+  await evaluate("document.querySelector('#content .copy-code').focus()");
+  await until(() => evaluate("getComputedStyle(document.activeElement).opacity === '1'"), 'keyboard-accessible copy icon');
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  await until(async () => await evaluate('navigator.clipboard.readText()') === chatSnippet, 'keyboard code copy');
+  await evaluate("window.originalWriteText = navigator.clipboard.writeText; navigator.clipboard.writeText = async () => { throw new Error('Denied'); }; document.querySelector('#content .copy-code').click()");
+  await until(() => evaluate("[...document.querySelectorAll('.toast-message')].some(n => n.textContent.startsWith('Copy unavailable.'))"), 'clipboard failure notice');
+  await evaluate('navigator.clipboard.writeText = window.originalWriteText; delete window.originalWriteText');
+  results.push({ test: 'Hover and keyboard code copying in chat, streamed fences, tool output and Markdown previews; multiple snippets, exact whitespace and clipboard failures', status: 'pass' });
   const mathFixture = await readFile(`${root}test/fixtures/tidal-forces.md`, 'utf8');
   const expectedMath = [...mathFixture.matchAll(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g)].length;
   await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/tidal-forces.md` })}#token=${server.token}` });
@@ -523,6 +571,7 @@ try {
     assert.equal(await evaluate("document.querySelector('.source-code').textContent"), await readFile(`${root}test/fixtures/${filename}`, 'utf8'));
   };
   await openSource('nesting.py');
+  await verifyCodeCopy('#content .code-block', await readFile(`${root}test/fixtures/nesting.py`, 'utf8'));
   assert.equal(await evaluate("document.getElementById('highlight-mode').value"), 'nesting');
   assert.ok(await evaluate("new Set([...document.querySelectorAll('[data-depth]')].map(n => n.dataset.depth)).size >= 4"));
   for (const theme of ['light', 'dark']) {
@@ -534,6 +583,7 @@ try {
   }
   await evaluate("document.getElementById('highlight-mode').value = 'standard'; document.getElementById('highlight-mode').dispatchEvent(new Event('change'))");
   assert.ok(await evaluate("Boolean(document.querySelector('.hljs-keyword')) && !document.querySelector('[data-depth]')"));
+  await verifyCodeCopy('#content .code-block', await readFile(`${root}test/fixtures/nesting.py`, 'utf8'));
   assert.equal(await evaluate("document.querySelector('.source-code').textContent"), await readFile(`${root}test/fixtures/nesting.py`, 'utf8'));
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/python-standard-dark.png`, Buffer.from(result.data, 'base64')));
   await openSource('nesting.json');

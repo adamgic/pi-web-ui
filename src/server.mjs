@@ -22,6 +22,7 @@ const assets = new Map([
   ['/vendor/katex/katex.mjs', ['vendor/katex/katex.mjs', 'text/javascript; charset=utf-8']],
   ['/prose.js', ['prose.js', 'text/javascript; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/copy.js', ['copy.js', 'text/javascript; charset=utf-8']],
   ['/explorer.js', ['explorer.js', 'text/javascript; charset=utf-8']],
   ['/view.js', ['view.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],

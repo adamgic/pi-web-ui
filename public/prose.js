@@ -1,5 +1,6 @@
 import { equation } from './math.js';
 import { previewLink, readPreviewFragment } from './preview-links.js';
+import { copyableCode } from './copy.js';
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -87,8 +88,9 @@ function inline(parent, text, options) {
 export function prose(text, options = {}) {
   const node = el('div', undefined, 'prose');
   const headingIds = new Set();
-  let code, paragraph, list, math, mathEnd;
-  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+  let code, codeSource, paragraph, list, math, mathEnd;
+  const rawLines = String(text || '').split('\n');
+  const lines = rawLines.map(line => line.replace(/\r$/, ''));
   for (let row = 0; row < lines.length; row++) {
     const line = lines[row];
     if (!code && math) {
@@ -107,10 +109,19 @@ export function prose(text, options = {}) {
     }
     if (/^\s*```/.test(line)) {
       if (code) code = undefined;
-      else { code = el('pre'); node.append(code); }
+      else {
+        code = el('pre');
+        const source = { text: '' }; codeSource = source;
+        node.append(copyableCode(code, () => source.text));
+      }
       paragraph = undefined; list = undefined; continue;
     }
-    if (code) { code.append(document.createTextNode(`${line}\n`)); continue; }
+    if (code) {
+      const ending = row < lines.length - 1 ? '\n' : '';
+      code.append(document.createTextNode(line + ending));
+      codeSource.text += rawLines[row] + ending;
+      continue;
+    }
     const cells = tableCells(line), separators = tableCells(lines[row + 1] || '');
     if (cells.length && cells.length === separators.length && separators.every(cell => /^:?-{3,}:?$/.test(cell))) {
       const wrap = el('div', undefined, 'table-scroll'), table = el('table'), head = el('thead'), header = el('tr'), body = el('tbody');

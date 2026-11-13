@@ -189,6 +189,13 @@
 .copy-icon::before{left:1px;top:1px}
 .copy-icon::after{left:5px;top:5px;background:var(--bg)}
 
+.code-block{position:relative;min-width:0;margin:8px 0}
+.code-block>pre{margin:0;padding-right:50px}
+.copy-code{position:absolute;top:7px;right:7px;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:5px;background:var(--code-bg);color:var(--muted);opacity:0;pointer-events:none;transition:opacity .15s,background .15s}
+.copy-code .copy-icon::after{background:var(--code-bg)}
+.code-block:hover>.copy-code,.code-block:focus-within>.copy-code{opacity:1;pointer-events:auto}
+@media(hover:none){.copy-code{opacity:1;pointer-events:auto}}
+
 /* MathML formulas stay readable without forcing horizontal page overflow. */
 .equation { font-size: 1.1em; }
 .equation-display { overflow-x: auto; padding: 12px 0; margin: 12px 0; }

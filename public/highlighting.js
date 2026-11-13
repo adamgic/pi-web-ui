@@ -1,5 +1,6 @@
 import hljs from './vendor/highlight/highlight.js';
 import { nestingParts, colorNames } from './nesting.js';
+import { copyableCode } from './copy.js';
 
 const extensions = {
   py: 'python', pyw: 'python', json: 'json', jsonl: 'json', js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
@@ -39,6 +40,6 @@ export function highlightedCode(source, language, mode) {
       code.append(span);
     }
   } else code.textContent = source;
-  return pre;
+  return copyableCode(pre, source);
 }
 export { colorNames };
