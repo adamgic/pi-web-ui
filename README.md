@@ -2,11 +2,17 @@
 
 A browser interface for the **same session as your Pi terminal**, packaged as an independent Pi extension. It uses Pi's public extension APIs and ordinary session storage. There is no durable engine, separate agent process, build step, or dependency on a Pi source checkout.
 
-Tested against `@earendil-works/pi-coding-agent` 1.1.0. Requires Node.js 22.19+ and Pi installed on your PATH. This package has no additional runtime dependencies.
+Tested against `@earendil-works/pi-coding-agent` 1.1.0. Requires Node.js 22.19+ and Pi installed on your PATH. The browser terminal uses [node-pty](https://github.com/microsoft/node-pty) and [xterm.js](https://xtermjs.org/); these dependencies are installed locally, without a CDN. A C/C++ toolchain is needed on platforms without a node-pty prebuilt binary.
 
 ## Quick start
 
-From the workspace where you want Pi to work, run:
+For a source checkout, install its dependencies once:
+
+```sh
+npm --prefix ./pi-web-ui ci --omit=peer
+```
+
+Then, from the workspace where you want Pi to work, run:
 
 ```sh
 sh ./pi-web-ui/start.sh
@@ -85,6 +91,10 @@ The sidebar shows the full working directory (with the home prefix shortened to 
 
 Click **WORKING DIRECTORY** to show or hide the file explorer. It starts in the session working directory; click folders to browse, **↑ Up** to visit a parent (including outside the working directory), and **Working directory** to return in one click. Each component of the current path is a clickable breadcrumb, including the filesystem root. Hover a file, folder, or breadcrumb for about 650 ms to see its full path in a compact tooltip below the pointer. Hover the tooltip to see the copy cursor, then click anywhere on it to copy the path. Keyboard users can focus an item, wait for its tooltip, and press Tab then Enter or Space to copy; Escape dismisses the tooltip. Hiding and reopening the explorer preserves its current folder and scroll position during the page session. **↻** refreshes the listing. Files open in the existing preview in a new tab. Hidden files and symbolic links are included; unavailable links and special files cannot be opened. Browsing does not change Pi’s working directory.
 
+**BRANCH NAME**, between the working directory and session name, shows the current Git branch. It refreshes every five seconds while visible and when you return to the tab. Detached HEAD and directories outside Git repositories have explicit labels. Click **BRANCH NAME** to open a terminal in a new tab, even outside a Git repository.
+
+The terminal prints its starting working directory and runs a real interactive shell on the machine running Pi. It uses your configured shell (`SHELL`, falling back to your account shell; `ComSpec` on Windows). Commands, variables, `cd`, interactive programs, shell history, Ctrl+C, and window resizing work within that shell. Each tab has its own shell and inherits the Pi process’s environment and filesystem access. **Close shell**, closing or reloading the tab, and `/web stop` terminate that shell. A lost connection closes the shell; commands are never automatically replayed. Up to eight terminal tabs may be open at once. Browsing or changing directories in a terminal does not change Pi’s working directory.
+
 Prompt history comes from the active session and includes prompts accepted from this tab that are still queued. Switching history items preserves the cursor's character column, clamped to the destination line's length. Up enters the last line; Down enters the first line. While browsing, edits to recalled prompts are kept for that navigation pass; returning to your draft restores the original unsent text and saved cursor position. History is held steady during navigation so streaming updates do not move your position. Modified arrow keys retain their normal text-editing behavior.
 
 Light and dark appearance follow the OS/browser preference, including live changes. The page fits normal window sizes; the transcript scrolls within its panel. At widths of 440px or less, or heights of 560px or less, vertical page scrolling is enabled.
@@ -139,6 +149,7 @@ The browser assets and transport were adapted from the existing MIT-licensed Pi 
 From this package's repository checkout:
 
 ```sh
+npm ci --omit=peer
 npm run check
 node --test test/*.test.mjs
 node test/browser.mjs
@@ -233,8 +244,9 @@ run manually from Actions. New runs cancel older runs for the same PR.
 - Syntax and unit/server tests run on Node 22.19.0 (the supported minimum) and 24.
 - Browser checks run on Ubuntu 24.04 with the runner's Google Chrome and Node 24.
 - Browser logs, results, and screenshots are retained as artifacts for seven days,
-  including on test failure. Tests use fixtures and bundled libraries; no install,
-  Pi account, or secrets are needed.
+  including on test failure. CI installs the pinned terminal dependencies with
+  `npm ci --omit=peer`. Tests use disposable Git repositories and shells; no Pi
+  account or secrets are needed.
 
 Local equivalents are `npm run check`, `npm test`, and `npm run test:browser`.
 Set `CHROME_PATH` when Chrome is not at the default macOS location.

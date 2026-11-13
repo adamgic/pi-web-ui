@@ -1,6 +1,7 @@
 // Real Chromium checks using its built-in DevTools protocol; no browser-test dependency.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../src/server.mjs';
@@ -31,7 +32,7 @@ f.pi.sendUserMessage = (text, options) => {
   f.state.calls.push(['submit', text, options.deliverAs]);
   f.state.entries.push({ type: 'message', id: String(f.state.entries.length), message: { role: 'user', content: text } });
 };
-const server = await startServer(bridge);
+const server = await startServer(bridge, { terminalOptions: { shell: '/bin/sh', args: ['-i'], env: { ...process.env, ENV: '', PS1: 'test$ ' } } });
 const chrome = spawn(process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
   '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
   '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
@@ -87,6 +88,7 @@ try {
   await writeFile(`${explorerRoot}/My # Notes.md:12`, '# Explorer preview');
   await writeFile(`${explorerRoot}/.hidden`, 'Hidden file');
   await writeFile(`${profile}/explorer/outside.txt`, 'Outside working directory');
+  await promisify(execFile)('git', ['-C', explorerRoot, 'init', '--template=', '-b', 'browser-branch']);
   f.ctx.cwd = explorerRoot;
   bridge.update({ type: 'session_start' }, f.ctx);
   await until(() => evaluate("document.getElementById('cwd').textContent.endsWith('/explorer/root')"), 'explorer working directory');
@@ -95,9 +97,10 @@ try {
   assert.equal(await evaluate("document.getElementById('file-explorer').hidden"), true);
   await click('explorer-toggle');
   await atDirectory(explorerRoot);
+  await until(() => evaluate("document.getElementById('branch-name').textContent === 'browser-branch'"), 'current Git branch');
   assert.equal(await evaluate("document.getElementById('explorer-toggle').getAttribute('aria-expanded')"), 'true');
   assert.ok(await evaluate("document.getElementById('explorer-entries').textContent.includes('.hidden')"));
-  await evaluate("document.querySelector('#explorer-entries .directory').click()");
+  await evaluate("document.querySelector('#explorer-entries .directory[aria-label$=empty]').click()");
   await atDirectory(`${explorerRoot}/empty`);
   assert.equal(await evaluate("document.getElementById('explorer-status').textContent"), 'This directory is empty.');
   await click('explorer-toggle');
@@ -136,14 +139,14 @@ try {
     await cdp('Runtime.evaluate', { expression: `document.querySelector(${JSON.stringify(selector)}).querySelector('.copy-code').click()`, userGesture: true });
     await until(async () => await evaluate('navigator.clipboard.readText()') === expected, 'complete code copied exactly');
   };
-  await hover('#explorer-entries .directory');
+  await hover('#explorer-entries .directory[aria-label$=empty]');
   await pause(200);
   assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), true);
   await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 80 });
   await pause(700);
   assert.equal(await evaluate("document.getElementById('explorer-path-info').hidden"), true);
   for (const [selector, path] of [
-    ['#explorer-entries .directory', `${explorerRoot}/empty`],
+    ['#explorer-entries .directory[aria-label$=empty]', `${explorerRoot}/empty`],
     ['#explorer-entries a[href*="My"]', `${explorerRoot}/My # Notes.md:12`],
     ['#explorer-path [aria-current]', explorerRoot],
   ]) {
@@ -205,6 +208,38 @@ try {
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/file-explorer.png`, Buffer.from(result.data, 'base64')));
   await viewport(1440, 1000);
   await click('explorer-toggle');
+  assert.ok(await evaluate("document.getElementById('branch-label').getBoundingClientRect().top > document.getElementById('cwd').getBoundingClientRect().top && document.getElementById('branch-label').getBoundingClientRect().top < document.getElementById('session-name').getBoundingClientRect().top"));
+  const terminalUrl = await evaluate("document.getElementById('branch-label').href");
+  await cdp('Runtime.evaluate', { expression: "document.getElementById('branch-label').click()", userGesture: true });
+  const terminalTab = await until(async () => (await cdp('Target.getTargets')).targetInfos.find(target => target.url.split('#')[0] === terminalUrl.split('#')[0]), 'terminal tab');
+  const terminalSession = (await cdp('Target.attachToTarget', { targetId: terminalTab.targetId, flatten: true })).sessionId;
+  const terminalEvaluate = async expression => {
+    const result = await cdp('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, terminalSession);
+    if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+  };
+  await until(() => terminalEvaluate("document.getElementById('terminal-status')?.textContent === 'Connected'"), 'interactive terminal connection');
+  assert.equal(await terminalEvaluate("document.getElementById('terminal-cwd').textContent"), explorerRoot);
+  assert.equal(await terminalEvaluate('location.hash'), '');
+  assert.ok(await terminalEvaluate("document.querySelector('.xterm-rows').textContent.includes('Working directory:')"));
+  const terminalCommand = async text => {
+    await terminalEvaluate("document.querySelector('.xterm-helper-textarea').focus()");
+    await cdp('Input.insertText', { text }, terminalSession);
+    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' }, terminalSession);
+    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, terminalSession);
+  };
+  await terminalCommand("git checkout -b browser-new; printf 'BRANCH_%s\\n' CHANGED");
+  await until(() => terminalEvaluate("document.querySelector('.xterm-rows').textContent.includes('BRANCH_CHANGED')"), 'execute Git command');
+  await evaluate("window.dispatchEvent(new Event('focus'))");
+  await until(() => evaluate("document.getElementById('branch-name').textContent === 'browser-new'"), 'branch refresh after terminal checkout');
+  await terminalCommand('saved=ok; cd ..');
+  await terminalCommand('printf "STATE=%s:%s\\n" "$saved" "$(basename "$PWD")"');
+  await until(() => terminalEvaluate("document.querySelector('.xterm-rows').textContent.includes('STATE=ok:explorer')"), 'persistent terminal directory and variables');
+  await cdp('Page.captureScreenshot', { format: 'png' }, terminalSession).then(result => writeFile(`${out}/terminal.png`, Buffer.from(result.data, 'base64')));
+  await terminalEvaluate("document.getElementById('terminal-close').click()");
+  await until(() => terminalEvaluate("document.getElementById('terminal-status').textContent === 'Shell closed' && !document.getElementById('terminal-new').hidden"), 'terminal closes shell');
+  await cdp('Target.closeTarget', { targetId: terminalTab.targetId });
+  results.push({ test: 'Branch sidebar placement and live Git branch; authenticated terminal tab, printed cwd, real commands, persistent cd/variables and shell close', status: 'pass' });
   f.ctx.cwd = '/example/project';
   bridge.update({ type: 'session_start' }, f.ctx);
   await until(() => evaluate("document.getElementById('cwd').textContent === '/example/project'"), 'restore test working directory');

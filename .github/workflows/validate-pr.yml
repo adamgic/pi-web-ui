@@ -29,8 +29,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           package-manager-cache: false
-      # Tests use Node built-ins, fixtures, and bundled browser libraries.
-      # No npm install (or live Pi credentials) is needed.
+      - name: Install runtime dependencies
+        run: npm ci --omit=peer
       - name: Check syntax
         run: npm run check
       - name: Run unit and server tests
@@ -48,6 +48,8 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - name: Install runtime dependencies
+        run: npm ci --omit=peer
       - name: Locate runner Chrome
         shell: bash
         run: |
