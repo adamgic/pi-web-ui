@@ -1,6 +1,7 @@
 import { prose as renderProse } from './prose.js';
 import { usageOf, transcriptOf, formatDuration } from './view.js';
 import { createExplorer } from './explorer.js';
+import { copyValue, copyableCode } from './copy.js';
 
 const $ = id => document.getElementById(id);
 const fragment = new URLSearchParams(location.hash.slice(1));
@@ -26,23 +27,6 @@ function el(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
-async function copyValue(label, value) {
-  try { await navigator.clipboard.writeText(String(value)); showToast(`${label} copied`); }
-  catch { showToast('Copy unavailable. Select the value to copy manually.'); }
-}
-// Oldest notices stay at the top; each expires three seconds after appearing.
-function showToast(message) {
-  const toast = el('div', undefined, 'toast entering');
-  const content = el('div', undefined, 'toast-content');
-  content.append(el('div', message, 'toast-message'));
-  toast.append(content);
-  $('toasts').append(toast);
-  requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.remove('entering')));
-  setTimeout(() => {
-    toast.classList.add('leaving');
-    setTimeout(() => toast.remove(), 180);
-  }, 3000);
-}
 function prose(text) { return renderProse(text, { token, cwd: view?.session.cwd }); }
 function detail(key, title, contents, className) {
   const node = el('details', undefined, className);
@@ -64,8 +48,8 @@ function renderTranscript() {
     if (item.type === 'tool') {
       const title = el('span'); title.append(el('strong', item.name), el('span', item.status, 'tool-state'));
       const body = el('div', undefined, 'tool-body');
-      if (item.args !== undefined) body.append(el('pre', JSON.stringify(item.args, null, 2)));
-      if (item.output) body.append(el('pre', item.output));
+      if (item.args !== undefined) body.append(copyableCode(el('pre', JSON.stringify(item.args, null, 2))));
+      if (item.output) body.append(copyableCode(el('pre', item.output)));
       if (item.truncated) body.append(el('p', item.truncated, 'muted'));
       fragment.append(detail(item.key, title, body, `tool-card ${item.status === 'error' ? 'error' : ''}`));
     } else if (item.type === 'compaction') fragment.append(detail(item.key, el('span', 'Context summary'), prose(item.text), 'thinking-card'));

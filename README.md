@@ -189,6 +189,12 @@ Source previews default to **Nesting levels** coloring. The **Coloring** selecto
 switches to **Standard syntax** (bundled Highlight.js 11.12.0, common languages)
 and remembers the choice in this browser. No extension or CDN is needed.
 
+Hover a code block in chat or a file preview to reveal its copy icon in the top
+right. Clicking it copies the entire snippet, preserving indentation and line
+breaks without Markdown fences or interface text. Source previews copy the full
+file in either coloring mode. The controls also appear on keyboard focus and
+remain visible on touch devices; copy success or failure is shown in a toast.
+
 - Python: indentation levels plus nested parentheses, lists, and dictionaries.
 - JSON: root keys use level 0, values level 1, nested keys level 2, their values
   level 3, and so on. Array items add a level too.
