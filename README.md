@@ -155,7 +155,7 @@ node --test test/*.test.mjs
 node test/browser.mjs
 ```
 
-The browser check uses Chrome's DevTools protocol directly, without an additional testing dependency. It defaults to the macOS Google Chrome path; set `CHROME_PATH` elsewhere. It saves screenshots/results under [output](output) and retains its disposable browser profile under `temp/`.
+The browser check uses Chrome's DevTools protocol directly, without an additional testing dependency. It defaults to the macOS Google Chrome path; set `CHROME_PATH` elsewhere. It allows up to 60 seconds for Chrome's DevTools endpoint to become ready and reports launch failures immediately. It saves screenshots/results and Chrome's startup output (`chrome.log`) under [output](output) and retains its disposable browser profile under `temp/`.
 
 Each assistant response has an overlapping-rectangles copy icon (hover for **Copy response**) that copies its original text, preserving Markdown syntax for pasting into a `.md` file. During streaming it copies the text received so far. Copying shows a toast. **Expand tool details** sits to the right of the activity indicator above the prompt; Alt+O still works without an inline shortcut hint.
 

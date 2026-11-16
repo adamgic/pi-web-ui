@@ -1,12 +1,13 @@
 // Real Chromium checks using its built-in DevTools protocol; no browser-test dependency.
 import assert from 'node:assert/strict';
-import { spawn, execFile } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../src/server.mjs';
 import { createBridge } from '../src/bridge.mjs';
 import { fixture } from './fixture.mjs';
+import { launchChrome } from './chrome.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const out = `${root}output`;
@@ -33,10 +34,7 @@ f.pi.sendUserMessage = (text, options) => {
   f.state.entries.push({ type: 'message', id: String(f.state.entries.length), message: { role: 'user', content: text } });
 };
 const server = await startServer(bridge, { terminalOptions: { shell: '/bin/sh', args: ['-i'], env: { ...process.env, ENV: '', PS1: 'test$ ' } } });
-const chrome = spawn(process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
-  '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
-  '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank',
-], { stdio: 'ignore' });
+let chrome;
 let socket;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn, message) {
@@ -46,9 +44,11 @@ async function until(fn, message) {
 const results = [];
 const mediaDiagnostics = [];
 try {
-  const port = await until(async () => (await readFile(`${profile}/DevToolsActivePort`, 'utf8')).split('\n')[0], 'Chrome startup');
-  const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-  socket = new WebSocket(pages.find(p => p.type === 'page').webSocketDebuggerUrl);
+  chrome = await launchChrome({
+    executable: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    profile, logPath: `${out}/chrome.log`,
+  });
+  socket = new WebSocket(chrome.page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   let next = 0;
   const requests = new Map();
@@ -709,5 +709,5 @@ try {
   await writeFile(`${out}/browser-results.json`, JSON.stringify({ passed: results, failure: error.stack, mediaDiagnostics }, null, 2));
   throw error;
 } finally {
-  socket?.close(); chrome.kill('SIGTERM'); await server.close();
+  socket?.close(); await chrome?.stop(); await server.close();
 }
