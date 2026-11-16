@@ -153,6 +153,12 @@
 
 .session-copy{display:block;width:100%;padding:0;margin:10px 0;text-align:left;color:var(--text);font-size:13px;font-weight:600;line-height:1.5;white-space:normal;overflow-wrap:anywhere;cursor:copy}
 #session-details-panel{margin-top:14px}
+.branch-section{margin:0 0 20px}
+#branch-label{width:fit-content;padding:4px 0;text-decoration:none}
+#branch-label[href]{cursor:pointer}
+#branch-label[href]:hover{text-decoration:underline;color:var(--accent)}
+#branch-label:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#branch-name{display:block;margin-top:7px;font-size:13px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
 
 /* The explorer keeps its DOM and scroll position while collapsed. */
 #explorer-toggle{display:flex;align-items:center;gap:6px;padding:4px 0;text-align:left}

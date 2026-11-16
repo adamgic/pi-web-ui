@@ -1,0 +1,36 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { gitBranch } from '../src/git.mjs';
+import { startServer } from '../src/server.mjs';
+
+test('branch metadata handles unborn branches, checkouts, detached HEAD, worktrees and non-repositories', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'pi-branch-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  assert.equal((await gitBranch(dir)).kind, 'none');
+  const exec = promisify(execFile);
+  const git = (...args) => exec('git', ['-C', dir, ...args]);
+  await git('init', '--template=', '-b', 'initial-branch');
+  assert.deepEqual(await gitBranch(dir), { cwd: dir, kind: 'branch', name: 'initial-branch' });
+  await git('-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-m', 'fixture');
+  const server = await startServer({ subscribe: () => () => {}, current: () => ({ session: { cwd: dir } }) });
+  t.after(() => server.close());
+  assert.equal((await fetch(server.origin + '/api/git/branch')).status, 401);
+  const read = async () => (await fetch(server.origin + '/api/git/branch', { headers: { Authorization: `Bearer ${server.token}` } })).json();
+  assert.equal((await read()).name, 'initial-branch');
+  await git('checkout', '-b', 'feature/current');
+  assert.equal((await read()).name, 'feature/current');
+  await mkdir(join(dir, 'nested'));
+  assert.equal((await gitBranch(join(dir, 'nested'))).name, 'feature/current');
+  const worktree = join(dir, 'linked');
+  await git('worktree', 'add', '-b', 'linked-branch', worktree);
+  assert.equal((await gitBranch(worktree)).name, 'linked-branch');
+  await git('checkout', '--detach');
+  assert.equal((await read()).kind, 'detached');
+  assert.match((await read()).name, /^Detached HEAD \([a-f0-9]+\)$/);
+  assert.equal((await gitBranch(join(dir, 'missing'))).kind, 'unavailable');
+});

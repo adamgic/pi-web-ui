@@ -1,4 +1,8 @@
 import { htmlPreviews } from './html-preview.mjs';
+import { gitBranch } from './git.mjs';
+import { createTerminals } from './terminal.mjs';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { mediaType, serveMedia } from './media.mjs';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -6,6 +10,7 @@ import { realpath, stat, readFile, readdir } from 'node:fs/promises';
 
 import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+const require = createRequire(import.meta.url);
 
 const assets = new Map([
   ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
@@ -23,6 +28,13 @@ const assets = new Map([
   ['/prose.js', ['prose.js', 'text/javascript; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/copy.js', ['copy.js', 'text/javascript; charset=utf-8']],
+  ['/branch.js', ['branch.js', 'text/javascript; charset=utf-8']],
+  ['/terminal.html', ['terminal.html', 'text/html; charset=utf-8']],
+  ['/terminal.js', ['terminal.js', 'text/javascript; charset=utf-8']],
+  ['/terminal.css', ['terminal.css', 'text/css; charset=utf-8']],
+  ['/vendor/xterm/xterm.js', [pathToFileURL(require.resolve('@xterm/xterm')), 'text/javascript; charset=utf-8']],
+  ['/vendor/xterm/addon-fit.js', [pathToFileURL(require.resolve('@xterm/addon-fit')), 'text/javascript; charset=utf-8']],
+  ['/vendor/xterm/xterm.css', [pathToFileURL(require.resolve('@xterm/xterm/css/xterm.css')), 'text/css; charset=utf-8']],
   ['/explorer.js', ['explorer.js', 'text/javascript; charset=utf-8']],
   ['/view.js', ['view.js', 'text/javascript; charset=utf-8']],
   ['/style.css', ['style.css', 'text/css; charset=utf-8']],
@@ -44,12 +56,13 @@ async function body(req) {
 }
 
 /** Local authenticated transport for the active Pi session. */
-export async function startServer(bridge, { port = 0 } = {}) {
+export async function startServer(bridge, { port = 0, terminalOptions } = {}) {
   const token = randomBytes(32).toString('hex');
   const clients = new Set();
   const receipts = new Map();
   const media = new Map();
   const html = htmlPreviews();
+  const terminals = createTerminals(terminalOptions);
   let origin;
   let timer;
   let queue = Promise.resolve();
@@ -107,6 +120,27 @@ export async function startServer(bridge, { port = 0 } = {}) {
       }
       if (url.pathname.startsWith('/api/')) {
         if (!authorized(req)) throw error(401, 'Open the full launch URL printed in the terminal.');
+        if (req.method === 'GET' && url.pathname === '/api/git/branch') {
+          json(res, 200, await gitBranch(bridge.current().session.cwd)); return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/terminal') {
+          const input = await body(req);
+          if (!input || typeof input !== 'object' || Array.isArray(input)) throw error(400, 'Invalid terminal options.');
+          const session = await terminals.open({ ...input, cwd: input.cwd ?? bridge.current().session.cwd });
+          if (res.destroyed) { terminals.remove(session.id); return; }
+          json(res, 201, session); return;
+        }
+        const terminalRoute = /^\/api\/terminal\/([a-f0-9]{48})(\/events)?$/.exec(url.pathname);
+        if (terminalRoute) {
+          const [, id, events] = terminalRoute;
+          if (req.method === 'GET' && events) { terminals.attach(id, res); return; }
+          if (req.method === 'POST' && !events) {
+            const input = await body(req);
+            if (!input || typeof input !== 'object' || Array.isArray(input)) throw error(400, 'Invalid terminal action.');
+            terminals.command(id, input); json(res, 200, { accepted: true }); return;
+          }
+          if (req.method === 'DELETE' && !events) { terminals.remove(id); json(res, 200, { closed: true }); return; }
+        }
         const localPath = (value, literal = false) => {
           if (typeof value !== 'string' || !value || value.includes('\0')) throw error(400, 'Invalid file path.');
           if (literal) return resolve(url.searchParams.get('cwd') || bridge.current().session.cwd, value);
@@ -226,7 +260,9 @@ export async function startServer(bridge, { port = 0 } = {}) {
       }
       const asset = assets.get(url.pathname);
       if (req.method !== 'GET' || !asset) throw error(404, 'Not found.');
-      const content = await readFile(new URL(`../public/${asset[0]}`, import.meta.url));
+      // xterm generates terminal color styles dynamically; scripts remain self-only.
+      if (url.pathname === '/terminal.html') res.setHeader('Content-Security-Policy', policy.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"));
+      const content = await readFile(asset[0] instanceof URL ? asset[0] : new URL(`../public/${asset[0]}`, import.meta.url));
       res.writeHead(200, { 'Content-Type': asset[1] }); res.end(content);
     } catch (e) {
       if (!res.headersSent) json(res, e.status || 500, { error: e.message });
@@ -238,13 +274,14 @@ export async function startServer(bridge, { port = 0 } = {}) {
       server.once('error', reject);
       server.listen(port, '127.0.0.1', resolve);
     });
-  } catch (e) { unsubscribe(); clearInterval(heartbeat); clearTimeout(timer); throw e; }
+  } catch (e) { terminals.close(); unsubscribe(); clearInterval(heartbeat); clearTimeout(timer); throw e; }
   origin = `http://127.0.0.1:${server.address().port}`;
   return {
     origin, token, url: `${origin}/#token=${token}`,
     async close() {
       if (closePromise) return closePromise;
       closing = true; unsubscribe(); clearTimeout(timer); clearInterval(heartbeat);
+      terminals.close();
       for (const res of clients) res.end();
       clients.clear(); media.clear(); html.clear();
       closePromise = new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
