@@ -73,7 +73,7 @@ export async function executeCommand(command, { pi, ctx, compacting, changeSessi
       idle();
       const parsed = typeof command.text === 'string' && parseSlash(command.text);
       const descriptor = parsed && commandsFor(pi).find(item => item.name === parsed.name);
-      if (!descriptor || !['terminal', 'browser'].includes(descriptor.mode) || /[\r\n\x00-\x1f\x7f]/.test(command.text)) throw fail(400, 'Choose a valid single-line Pi command.');
+      if (!descriptor || (descriptor.mode !== 'terminal' && !['settings', 'scoped-models'].includes(parsed.name)) || /[\x00-\x1f\x7f]/.test(command.text)) throw fail(400, 'Choose a valid single-line Pi command.');
       if (!ctx.ui.setEditorText) throw fail(503, 'Pi’s terminal editor is unavailable. Copy the command instead.');
       if (ctx.ui.getEditorText?.().trim()) throw fail(409, 'The terminal has an unfinished draft. Clear it there, or copy this command.');
       ctx.ui.setEditorText(command.text.trim());

@@ -72,10 +72,11 @@ Browser controls:
 | Alt+Enter / Follow-up | Queue a prompt after the current run. |
 | Escape / Stop / `/abort` | Request cancellation through Pi. |
 | Alt+M / Model / `/model` | Select an authenticated model while idle. |
-| Alt+T / Thinking / `/thinking` | Cycle thinking levels; Pi clamps to the model's capabilities. |
+| Alt+T / Thinking | Cycle thinking levels; Pi clamps to the model's capabilities. |
+| `/thinking [level]` | Choose a thinking level from a list, or set it directly. |
 | Compact / `/compact [instructions]` | Compact context when idle. |
 | Alt+O | Expand or collapse tool and reasoning details. |
-| `/help` | Show browser shortcuts. |
+| `/help` / Commands | Browse and filter all commands. `/hotkeys` shows browser shortcuts. |
 | Sessions | Open a searchable list of saved sessions for the current working directory. |
 | New session (inside Sessions) | Start a fresh Pi session and switch both the terminal and browser to it. |
 
@@ -93,11 +94,28 @@ The footer shows an animated gradient through “Thinking…” while Pi is work
 
 ## Authentication and terminal interactions
 
-Run `/login` **in the Pi terminal** to authenticate your provider, then open the browser model picker. It refreshes the available models from Pi. Provider credentials remain managed by Pi; the extension does not implement a second login flow or send credentials to browser JavaScript.
+Browser `/login` opens a provider picker and prepares the selected command in Pi's terminal. Press Enter there to complete authentication, then reopen the browser model picker to refresh available models. Provider credentials remain managed by Pi and are not sent to browser JavaScript. Preparing a command never overwrites an unfinished terminal draft.
 
 Use the **Sessions** picker in the top bar to search saved sessions, switch sessions, or create a **New session**. The list refreshes each time the picker opens. These actions are available while Pi is idle with no queued messages or compaction. The picker shows session names (or the first prompt), message counts, and modification times. It respects the current session directory, and only lists sessions for the current working directory. Pi's session-change hooks can cancel an operation. A blank session may not appear in the saved list until Pi persists it after a conversation.
 
-Use the terminal for `/tree`, `/reload`, custom extension commands, permission dialogs, and other terminal UI interactions. Terminal `/resume` and `/new` remain available too. The browser provides its own small command set; use the session buttons instead of typing those slash commands in the browser. Unknown slash commands receive guidance and are never forwarded as model prompts, including through the follow-up button.
+Type `/` in the composer to see command suggestions. Up/Down selects a suggestion, Tab completes it, and Escape dismisses the suggestions without aborting Pi. Enter executes an exact command or completes a partial name. The searchable `/help` list, session/model pickers, and command dialogs share the same list component and styling. **Back** returns to the previous list, preserving its filter and scroll position, including from Tree to Help and from the provider handoff to the provider list. Focus outlines have padding inside scrollable lists so they stay visible on narrow screens.
+
+| Commands | Browser behavior |
+| --- | --- |
+| `/model [provider/model]` | Open the existing model picker, optionally filtered. |
+| `/new`, `/resume` | Confirm a new session or open the existing saved-session picker. |
+| `/tree`, `/fork`, `/clone` | Navigate an entry, fork before a user message, or clone through the current entry. The original history is preserved. Tree navigation can optionally summarize the branch being left, which uses the model. |
+| `/name [name]`, `/session` | Rename the session or view metadata and usage. |
+| `/compact [instructions]`, `/abort` | Open the existing compaction dialog or compact with supplied instructions; stop active work. |
+| `/copy` | Copy the last assistant response as Markdown. |
+| `/export [filename.html\|filename.jsonl]` | Download the visible branch as standalone HTML or the complete session tree as Pi JSONL. The browser chooses the save location; paths do not write files on the server. |
+| `/tools` | Select the tools declared to the model. Deferred tools may remain callable through tool search. |
+| `/settings`, `/scoped-models` | Inspect effective settings or the model cycle. Configure them through a terminal handoff; scoped models can also be selected here. |
+| `/changelog`, `/hotkeys`, `/help` | Read the installed Pi changelog, view browser shortcuts, or browse commands. |
+| `/quit` | Confirm shutdown of Pi and the web server. |
+| Prompt templates and `/skill:name` | Discover from Pi at runtime and submit with Pi's argument/template expansion and the selected steer/follow-up mode. |
+
+`/login`, `/logout`, `/import`, `/share`, `/bug`, `/trust`, `/reload`, and registered extension commands appear with a **Pi terminal** label. These workflows depend on terminal-owned APIs or custom terminal widgets; their dialog lets you copy the command or prepare it in the terminal, where you press Enter to execute it. Reload may require opening a fresh launch URL. No external sharing or bug reporting occurs merely by opening a command. Unknown commands and built-in commands are never forwarded as model prompts, including through Follow-up.
 
 The extension does not replicate arbitrary terminal widgets, browser file uploads, or durable task/subagent navigation. It shows the active Pi session. This is a browser frontend for an ordinary Pi session, with the terminal available for the remaining workflows.
 
@@ -125,8 +143,10 @@ Commands have identifiers for bounded replay protection within the server proces
 | [src/extension.js](src/extension.js) | Registers `/web`, CLI flags, Pi event listeners, browser launch, and cleanup. No server starts during extension registration. |
 | [src/transport.mjs](src/transport.mjs) | Keeps the server alive during browser session changes and transfers ownership to the new extension runtime through a temporary handoff. |
 | [src/bridge.mjs](src/bridge.mjs) | Maps public Pi session APIs/events into browser snapshots and validates browser actions. Handles the gap between `message_end` and session persistence. |
+| [src/commands.mjs](src/commands.mjs) | Validates slash-command actions and exposes session/tree/tool/settings views through public Pi APIs. |
 | [src/server.mjs](src/server.mjs) | Serves fixed static assets, authenticated commands, current state, and SSE updates. |
 | [public/app.js](public/app.js) | Browser rendering, dialogs, keyboard controls, safe text/Markdown rendering, and reconnects. |
+| [public/commands.js](public/commands.js), [public/command-catalog.js](public/command-catalog.js), [public/picker.js](public/picker.js) | Command discovery, autocomplete, dialogs, downloads, and shared session/model/command list rows. |
 | [public/view.js](public/view.js) | Pure transcript and usage projections from ordinary Pi session entries. |
 | [public/index.html](public/index.html), [public/style.css](public/style.css) | Accessible interface structure, responsive layout, and OS theme selection. |
 | [start.mjs](start.mjs), [start.sh](start.sh) | Launch the installed Pi executable with this extension enabled. |

@@ -16,20 +16,51 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
   const content = document.getElementById('command-content');
   const error = document.getElementById('command-error');
   const suggestions = document.getElementById('command-suggestions');
+  const back = document.getElementById('command-back');
+  const navigation = [];
   let dialogSession, generation = 0, busy = false, active = 0, matches = [], dismissed;
   const catalog = () => getView()?.commands || builtinCommands;
   const fail = problem => { error.textContent = problem.message; error.hidden = false; };
   const close = () => dialog.close();
-  dialog.addEventListener('close', () => { if (dialog.open) return; generation++; dialogSession = undefined; prompt.focus(); });
+  dialog.addEventListener('close', () => { if (dialog.open) return; generation++; dialogSession = undefined; navigation.length = 0; back.hidden = true; prompt.focus(); });
+  back.onclick = () => {
+    const previous = navigation.pop();
+    if (!previous) return;
+    generation++; busy = false;
+    title.textContent = previous.title; content.replaceChildren(...previous.children);
+    error.hidden = true; back.hidden = !navigation.length;
+    (previous.focus?.isConnected ? previous.focus : content.querySelector('input, button'))?.focus({ preventScroll: true });
+    for (const [element, scrollTop] of previous.scroll) element.scrollTop = scrollTop;
+    dialog.scrollTop = previous.dialogScroll;
+  };
   const open = heading => {
+    if (dialog.open) {
+      navigation.push({ title: title.textContent, children: [...content.childNodes], focus: document.activeElement,
+        scroll: [...content.querySelectorAll('.model-list')].map(element => [element, element.scrollTop]), dialogScroll: dialog.scrollTop });
+    }
     generation++; busy = false; dialogSession = getView()?.session.id;
     title.textContent = heading; content.replaceChildren(); error.hidden = true;
+    back.hidden = !navigation.length;
     if (!dialog.open) dialog.showModal();
     hideSuggestions();
   };
+  async function showExisting(id, show) {
+    const child = document.getElementById(id);
+    let returnButton = child.querySelector('.dialog-back');
+    if (dialog.open && !returnButton) {
+      returnButton = node('button', '← Back', 'dialog-back'); returnButton.type = 'button';
+      returnButton.onclick = () => child.close();
+      child.querySelector('.dialog-head').prepend(returnButton);
+      child.addEventListener('close', () => { returnButton.remove(); }, { once: true });
+    }
+    await show();
+  }
   const send = async (action, payload, sessionId = dialogSession || getView()?.session.id) => {
     if (sessionId !== getView()?.session.id) throw new Error('The active session changed. Open the command again.');
-    return request(action, payload, sessionId);
+    const version = generation, inDialog = dialog.open;
+    const result = await request(action, payload, sessionId);
+    if (inDialog && version !== generation) throw new Error('The command dialog changed.');
+    return result;
   };
   const act = async callback => {
     if (busy) return;
@@ -41,9 +72,9 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     try { await callback(); }
     catch (problem) { if (version === generation) fail(problem); }
     finally {
+      buttons.forEach((button, index) => { button.disabled = disabled[index]; });
       if (version === generation) {
         busy = false;
-        buttons.forEach((button, index) => { button.disabled = disabled[index]; });
       }
     }
   };
@@ -108,9 +139,8 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     open('Slash commands');
     paragraph('Choose a command, or type / in the composer. Commands marked “Pi terminal” use its interactive workflow.');
     list(catalog().map(item => ({ value: item.name, title: `/${item.name} ${item.argumentsHint || ''}`.trim(), description: `${item.description}${item.mode === 'terminal' ? ' · Pi terminal' : item.mode === 'prompt' ? ' · Sends a prompt' : ''}` })), async item => {
-      close();
       const descriptor = catalog().find(command => command.name === item.value);
-      if (descriptor.mode === 'prompt') { prompt.value = `/${item.value} `; prompt.focus(); }
+      if (descriptor.mode === 'prompt') { close(); prompt.value = `/${item.value} `; prompt.focus(); }
       else await execute(`/${item.value}`);
     }, { label: 'Filter commands' });
   }
@@ -192,8 +222,8 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     if (args && !['model', 'thinking', 'name', 'compact', 'export'].includes(name)) throw new Error(`/${name} does not accept arguments.`);
     switch (name) {
       case 'help': showCommands(); break;
-      case 'hotkeys': document.getElementById('help-dialog').showModal(); break;
-      case 'model': await showModels(args); break;
+      case 'hotkeys': await showExisting('help-dialog', () => document.getElementById('help-dialog').showModal()); break;
+      case 'model': await showExisting('model-dialog', () => showModels(args)); break;
       case 'thinking':
         if (args) await send('thinking', { level: args }, getView()?.session.id);
         else {
@@ -202,7 +232,7 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
         }
         break;
       case 'new': confirm('New session', 'Start a new conversation. Pi preserves your saved session.', 'new-session'); break;
-      case 'resume': await showSessions(); break;
+      case 'resume': await showExisting('session-dialog', showSessions); break;
       case 'tree': case 'fork': await tree(name); break;
       case 'clone': confirm('Clone session', 'Create a copy through the current entry. The original session is preserved.', 'clone'); break;
       case 'name':
@@ -212,7 +242,7 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
       case 'session': sessionInfo(); break;
       case 'compact':
         if (args) await send('compact', { instructions: args }, getView()?.session.id);
-        else document.getElementById('compact-dialog').showModal();
+        else await showExisting('compact-dialog', () => document.getElementById('compact-dialog').showModal());
         break;
       case 'abort': await send('abort', {}, getView()?.session.id); break;
       case 'copy': {

@@ -38,6 +38,7 @@ test('browser session changes hand the same server to a fresh extension runtime'
   const entries = [{ id: 'saved', path: '/example/saved.jsonl', name: 'Saved', modified: new Date(), messageCount: 2 }];
   const create = id => {
     const f = fixture(); f.state.id = id;
+    f.state.entries = [{ id: 'user', type: 'message', message: { role: 'user', content: 'Question' } }, { id: 'answer', type: 'message', parentId: 'user', message: { role: 'assistant', content: [{ type: 'text', text: 'Answer' }] } }];
     f.flags.set('web-ui', true); f.flags.set('web-ui-no-open', true);
     extension(f.pi, { listSessions: async () => entries });
     const dispatch = async text => {
@@ -59,6 +60,15 @@ test('browser session changes hand the same server to a fresh extension runtime'
     };
     f.ctx.newSession = options => replace('fresh', options);
     f.ctx.switchSession = (path, options) => replace(path === '/example/saved.jsonl' ? 'saved' : 'bad', options);
+    f.ctx.fork = (entryId, options) => {
+      assert.equal(entryId, options.position === 'at' ? 'answer' : 'user');
+      return replace(options.position === 'at' ? 'cloned' : 'forked', options);
+    };
+    f.ctx.navigateTree = async (entryId, options) => {
+      f.state.calls.push(['tree', entryId, options.summarize]);
+      await f.emit('session_tree');
+      return { cancelled };
+    };
     return f;
   };
   active = create('initial');
@@ -85,6 +95,14 @@ test('browser session changes hand the same server to a fresh extension runtime'
   assert.equal((await post('new-session', { sessionId: 'initial' })).status, 409);
   assert.equal((await post('switch-session', { path: '/example/saved.jsonl' })).status, 200);
   assert.equal((await state()).session.id, 'saved');
+  assert.equal((await post('tree', { entryId: 'user', summarize: true })).status, 200);
+  assert.deepEqual(active.state.calls.at(-1), ['tree', 'user', true]);
+  assert.equal((await state()).session.id, 'saved', 'tree navigation keeps the current session');
+  assert.equal((await post('fork', { entryId: 'user' })).status, 200);
+  assert.equal((await state()).session.id, 'forked');
+  assert.equal((await post('clone')).status, 200);
+  assert.equal((await state()).session.id, 'cloned');
+  assert.equal(active.state.notices.length, 0, 'fork/clone reuse the existing web server');
   await active.emit('session_shutdown', { reason: 'quit' });
   await assert.rejects(fetch(url.origin));
 });
