@@ -2,6 +2,8 @@ import { prose as renderProse } from './prose.js';
 import { usageOf, transcriptOf, formatDuration } from './view.js';
 import { createExplorer } from './explorer.js';
 import { copyValue, copyableCode } from './copy.js';
+import { renderChoices } from './picker.js';
+import { createCommands } from './commands.js';
 
 const $ = id => document.getElementById(id);
 const fragment = new URLSearchParams(location.hash.slice(1));
@@ -20,6 +22,17 @@ const transcript = $('transcript');
 const welcome = transcript.firstElementChild;
 const prompt = $('prompt');
 let following = true;
+const slashCommands = createCommands({
+  prompt, getView: () => view, showModels, showSessions, prose,
+  report: message => { localError = message; alerts(); },
+  request: async (action, payload, sessionId) => {
+    if (!online || (pending && action !== 'abort')) throw new Error('Wait for the current command or connection to finish.');
+    if (action !== 'abort') pending = true;
+    controls();
+    try { return await command(action, payload, sessionId); }
+    finally { if (action !== 'abort') pending = false; controls(); }
+  },
+});
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -157,10 +170,10 @@ function render() {
   ]);
   $('queue').hidden = !view.pendingMessages;
   $('queue').replaceChildren(el('p', 'Pi has queued messages. They will appear in the transcript when consumed.'));
-  renderTranscript(); renderNavigation(); alerts(); controls();
+  renderTranscript(); renderNavigation(); alerts(); controls(); slashCommands.update();
 }
-async function command(action, payload = {}) {
-  const response = await fetch('/api/command', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, action, sessionId: selectedConversation, requestId: crypto.randomUUID() }) });
+async function command(action, payload = {}, sessionId = selectedConversation) {
+  const response = await fetch('/api/command', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, action, sessionId, requestId: crypto.randomUUID() }) });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status}).`);
   return body;
@@ -174,13 +187,13 @@ async function run(action, payload) {
   catch (error) { localError = `Unable to confirm command: ${error.message} Check the transcript before retrying.`; alerts(); return false; }
   finally { if (action !== 'abort') pending = false; if (action === 'submit') submitting = false; controls(); }
 }
-async function showModels() {
+async function showModels(query = '') {
   if (!view) return;
   try {
     const response = await fetch('/api/state', { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) throw new Error('Unable to refresh models. Reconnect using /web in the terminal.');
     view = await response.json(); render();
-    $('model-search').value = ''; filterModels(); $('model-dialog').showModal(); $('model-search').focus();
+    $('model-search').value = typeof query === 'string' ? query.replace('/', ' ') : ''; filterModels(); $('model-dialog').showModal(); $('model-search').focus();
   } catch (error) { localError = error.message; alerts(); }
 }
 function renderMetadata(node, rows, copyable = false) {
@@ -234,45 +247,35 @@ async function showSessions() {
   await refreshSessions();
 }
 function filterSessions() {
-  const query = $('session-search').value.toLowerCase();
-  const list = $('session-list');
-  list.replaceChildren();
-  for (const session of sessions.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(query))) {
+  const choices = sessions.map(session => {
     const current = session.id === selectedConversation;
-    const button = el('button', session.name, current ? 'selected active' : '');
-    button.dataset.current = String(current);
-    if (current) button.setAttribute('aria-current', 'true');
-    button.append(el('small', `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}`));
-    button.onclick = async () => { if (await run('switch-session', { path: session.path })) $('session-dialog').close(); };
-    list.append(button);
-  }
-  if (!list.children.length) list.append(el('p', 'No saved sessions match. New sessions appear after Pi saves them.', 'muted'));
+    return { value: session.path, title: session.name, selected: current, disabled: current, search: session.id,
+      description: `${current ? 'Current · ' : ''}${session.messageCount} messages · ${new Date(session.modified).toLocaleString()}` };
+  });
+  const buttons = renderChoices($('session-list'), choices, { query: $('session-search').value, empty: 'No saved sessions match. New sessions appear after Pi saves them.',
+    onSelect: async item => { if (await run('switch-session', { path: item.value })) $('session-dialog').close(); },
+  });
+  buttons.forEach(button => { button.dataset.current = String(button.getAttribute('aria-current') === 'true'); });
   controls();
 }
 function filterModels() {
-  $('models').replaceChildren();
-  const query = $('model-search').value.toLowerCase();
   const selected = view.model;
-  const models = view.models.filter(m => `${m.provider} ${m.modelId} ${m.name}`.toLowerCase().includes(query));
-  if (!models.length) $('models').append(el('p', 'No available models. Run /login in the Pi terminal, then reopen this model picker.', 'muted'));
-  for (const model of models) {
-    const button = el('button', model.name || model.modelId, model.provider === selected?.provider && model.modelId === selected?.modelId ? 'selected' : '');
-    button.append(el('small', `${model.provider} / ${model.modelId}`));
-    button.onclick = async () => { if (await run('model', { provider: model.provider, modelId: model.modelId })) $('model-dialog').close(); };
-    $('models').append(button);
-  }
+  renderChoices($('models'), view.models.map(model => ({ value: `${model.provider}/${model.modelId}`, title: model.name || model.modelId,
+    description: `${model.provider} / ${model.modelId}`, selected: model.provider === selected?.provider && model.modelId === selected?.modelId, model,
+  })), { query: $('model-search').value, empty: 'No available models match. Use /login to configure a provider, then reopen this picker.',
+    onSelect: async ({ model }) => { if (await run('model', { provider: model.provider, modelId: model.modelId })) $('model-dialog').close(); },
+  });
 }
 async function submit(mode = 'steer') {
   const text = prompt.value.trim(); if (!text || !online || pending) return;
   const before = prompt.value;
-  if (mode === 'steer' && text.startsWith('/')) {
-    if (text === '/model') showModels();
-    else if (text === '/help') $('help-dialog').showModal();
-    else if (text === '/thinking') { if (!await run('thinking')) return; }
-    else if (text === '/abort') { if (!await run('abort')) return; }
-    else if (/^\/compact(?:\s|$)/.test(text)) { if (!await run('compact', { instructions: text.slice(8).trim() })) return; }
-    else { localError = 'Run /login and other Pi commands in the terminal. Use /help for browser commands.'; alerts(); return; }
-    prompt.value = ''; historyNavigation = undefined; return;
+  if (text.startsWith('/')) {
+    const id = selectedConversation;
+    localError = ''; alerts(); slashCommands.hideSuggestions();
+    if (await slashCommands.submit(text, mode)) {
+      if (selectedConversation === id && prompt.value === before) { prompt.value = ''; historyNavigation = undefined; drafts.delete(id); }
+    }
+    return;
   }
   const id = selectedConversation;
   const historyLength = transcriptOf(view).filter(item => item.type === 'user').length;
@@ -299,6 +302,7 @@ $('compact').onclick = () => $('compact-dialog').showModal();
 $('compact-form').onsubmit = async event => { event.preventDefault(); if (await run('compact', { instructions: $('compact-instructions').value })) $('compact-dialog').close(); };
 $('model-search').oninput = filterModels;
 $('help').onclick = () => $('help-dialog').showModal();
+$('commands').onclick = () => slashCommands.showCommands();
 $('expand').onclick = () => {
   expanded = !expanded; opened.clear();
   transcript.querySelectorAll('details').forEach(node => { node.open = expanded; });
@@ -351,6 +355,7 @@ function navigateHistory(direction) {
 }
 prompt.onkeydown = event => {
   if (event.isComposing) return;
+  if (slashCommands.keydown(event)) return;
   if (['ArrowUp', 'ArrowDown'].includes(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
     // Let the textarea handle movement within the text and collapse selections.
     if (prompt.selectionStart !== prompt.selectionEnd) return;
