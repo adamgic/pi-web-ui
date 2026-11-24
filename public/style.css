@@ -213,3 +213,19 @@
 
 #run-timing { margin-left: auto; margin-right: 12px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
 .statusbar { flex-wrap: wrap; gap: 6px; }
+
+/* Slash commands reuse the session/model picker and native dialog surfaces. */
+.model-list { padding: 6px; scrollbar-gutter: stable; }
+.dialog-head .dialog-back { font-size: 12px; white-space: nowrap; padding: 6px 8px; }
+.dialog-head h2 { flex: 1; }
+.composer { position: relative; overflow: visible; }
+.command-suggestions { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; z-index: 5; max-height: min(280px, 35dvh); padding: 8px; background: var(--panel); border: 1px solid var(--dialog-border); border-radius: 10px; box-shadow: 0 8px 24px var(--dialog-shadow); }
+.command-suggestions button { font-size: 12px; }
+.command-suggestions [aria-selected=true] { border-color: var(--accent); background: var(--selected); }
+#commands { margin-right: 8px; font-size: 11px; }
+#command-content { overflow-wrap: anywhere; }
+#command-content > button { margin: 8px 8px 0 0; }
+#command-content .command-check { display: flex; align-items: center; gap: 8px; }
+#command-content .command-check input { width: auto; margin: 0; }
+#command-dialog .model-list button { white-space: normal; overflow-wrap: anywhere; }
+@media(max-width:1050px) { .compose-hint { display: block; } .compose-hint > kbd, .compose-hint > span { display: none; } .compose-hint { font-size: 0; } .composer-bottom { justify-content: space-between; } }

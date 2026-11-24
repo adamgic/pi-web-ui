@@ -15,10 +15,10 @@ function openBrowser(url) {
 }
 
 /** @param {import('@earendil-works/pi-coding-agent').ExtensionAPI} pi */
-export default function webUI(pi, { listSessions } = {}) {
+export default function webUI(pi, { listSessions, readChangelog } = {}) {
   const requests = new Map();
   let transferring = false;
-  const bridge = createBridge(pi, { listSessions, changeSession: request => new Promise((resolve, reject) => {
+  const bridge = createBridge(pi, { listSessions, readChangelog, changeSession: request => new Promise((resolve, reject) => {
     const id = randomUUID();
     const timeout = setTimeout(() => { requests.delete(id); reject(new Error('Pi did not handle the session command.')); }, 15000);
     requests.set(id, { ...request, resolve, reject, timeout });
@@ -98,6 +98,13 @@ export default function webUI(pi, { listSessions } = {}) {
       let replaced = false;
       try {
         if (ctx.sessionManager.getSessionId() !== request.sessionId || !ctx.isIdle() || ctx.hasPendingMessages()) throw new Error('Session state changed. Try again when idle.');
+        if (request.action === 'tree') {
+          const result = await ctx.navigateTree(request.entryId, { summarize: request.summarize });
+          if (result.cancelled) throw new Error('Tree navigation cancelled by Pi.');
+          bridge.update({ type: 'session_tree' }, ctx);
+          request.resolve({ accepted: true });
+          return;
+        }
         handoffs.set(transferId, { transport, previousFile: ctx.sessionManager.getSessionFile(), cwd: ctx.cwd });
         transport.freeze();
         transferring = true;
@@ -106,7 +113,9 @@ export default function webUI(pi, { listSessions } = {}) {
           await next.sendUserMessage(`/web attach ${transferId}`, { expandPromptTemplates: true });
           if (handoffs.has(transferId)) throw new Error('The new session could not attach the Web UI extension.');
         } };
-        const result = request.action === 'new-session' ? await ctx.newSession(options) : await ctx.switchSession(request.path, options);
+        const result = request.action === 'new-session' ? await ctx.newSession(options)
+          : ['fork', 'clone'].includes(request.action) ? await ctx.fork(request.entryId, { ...options, position: request.action === 'clone' ? 'at' : 'before' })
+          : await ctx.switchSession(request.path, options);
         if (result.cancelled) {
           transport.attach(bridge);
           request.reject(Object.assign(new Error('Session change cancelled by Pi.'), { status: 409 }));

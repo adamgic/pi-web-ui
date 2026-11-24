@@ -1,12 +1,13 @@
 import { homedir } from 'node:os';
 import { sep } from 'node:path';
 import { textContent } from '../public/view.js';
+import { commandsFor, executeCommand } from './commands.mjs';
 
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const copy = value => structuredClone(value);
 
 /** Adapts the public ExtensionAPI and ExtensionContext to browser snapshots. */
-export function createBridge(pi, { listSessions: discoverSessions = async () => [], changeSession, now = () => performance.now() } = {}) {
+export function createBridge(pi, { listSessions: discoverSessions = async () => [], changeSession, readChangelog, now = () => performance.now() } = {}) {
   let ctx;
   let timingSession, startedAt, lastDurationMs;
   let streaming;
@@ -72,7 +73,7 @@ export function createBridge(pi, { listSessions: discoverSessions = async () => 
       model: ctx.model ? { provider: ctx.model.provider, modelId: ctx.model.id } : undefined,
       thinkingLevel: pi.getThinkingLevel(), busy: !ctx.isIdle(), compacting,
       pendingMessages: ctx.hasPendingMessages(), context: ctx.getContextUsage(),
-      activeTools: pi.getActiveTools(), notices,
+      activeTools: pi.getActiveTools(), commands: commandsFor(pi), notices,
     };
   }
 
@@ -109,7 +110,7 @@ export function createBridge(pi, { listSessions: discoverSessions = async () => 
         if (typeof command.text !== 'string' || !command.text.trim()) throw fail(400, 'Enter a message.');
         if (!['steer', 'followUp'].includes(command.whenBusy)) throw fail(400, 'Invalid queue mode.');
         // Built-in CLI commands are not dispatched by sendUserMessage. Never send them to the model accidentally.
-        if (command.text.trim().startsWith('/')) throw fail(400, 'Use /model, /thinking, /compact, /abort or /help in the browser. Run other Pi commands in the terminal.');
+        if (command.text.trim().startsWith('/')) throw fail(400, 'Use the slash-command picker. Unknown commands are never sent to the model.');
         if (!ctx.model || !ctx.modelRegistry.getAvailable().some(model => model.provider === ctx.model.provider && model.id === ctx.model.id)) {
           throw fail(400, 'Choose an authenticated model. Run /login in the Pi terminal if needed.');
         }
@@ -139,10 +140,15 @@ export function createBridge(pi, { listSessions: discoverSessions = async () => 
       }
       case 'thinking': {
         const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-        pi.setThinkingLevel(levels[(levels.indexOf(pi.getThinkingLevel()) + 1) % levels.length]);
+        if (command.level !== undefined && !levels.includes(command.level)) throw fail(400, 'Unknown thinking level.');
+        pi.setThinkingLevel(command.level ?? levels[(levels.indexOf(pi.getThinkingLevel()) + 1) % levels.length]);
         break;
       }
-      default: throw fail(400, 'Unknown command.');
+      default: {
+        const result = await executeCommand(command, { pi, ctx, compacting, changeSession, readChangelog });
+        if (!closed) publish();
+        return result;
+      }
     }
     publish();
     return { accepted: true };

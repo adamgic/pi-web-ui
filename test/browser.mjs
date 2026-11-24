@@ -15,6 +15,7 @@ await mkdir(profile, { recursive: true });
 const f = fixture();
 const saved = new Map();
 const bridge = createBridge(f.pi, {
+  readChangelog: async () => '# Pi changes\n\nInstalled version notes.',
   listSessions: async () => [...saved].map(([id, entries]) => ({
     id, path: `/example/${id}.jsonl`, name: id, messageCount: entries.length, modified: new Date(),
   })),
@@ -237,7 +238,7 @@ try {
   f.pi.getSessionName = () => 'Renamed session';
   bridge.update({ type: 'session_start' }, f.ctx);
   await until(() => evaluate("document.title === 'Renamed session'"), 'renamed page title');
-  f.pi.getSessionName = () => 'Test session';
+  f.pi.getSessionName = () => f.state.name;
   bridge.update({ type: 'session_start' }, f.ctx);
   const table = await evaluate(`(async () => {
     const { prose } = await import('/prose.js');
@@ -476,9 +477,167 @@ try {
   assert.equal(await evaluate("document.querySelectorAll('#transcript .message.user').length"), 2);
   results.push({ test: 'New session, saved session picker, unchanged connection, restored history and per-session drafts', status: 'pass' });
   results.push({ test: 'Full directory path, sidebar usage, short-window scrolling, status position and size, ID tooltip and clipboard', status: 'pass' });
-  await evaluate("document.getElementById('prompt').value = '/login'; document.getElementById('send').click()");
-  await until(() => evaluate("document.getElementById('alerts').textContent.includes('terminal')"), 'terminal-only command guidance');
-  assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2);
+  const slash = async text => {
+    await until(() => evaluate("!document.getElementById('send').disabled"), 'command ready');
+    await evaluate(`document.getElementById('prompt').value = ${JSON.stringify(text)}; document.getElementById('send').click()`);
+  };
+  const commandDialog = heading => until(() => evaluate(`document.getElementById('command-dialog').open && document.getElementById('command-title').textContent === ${JSON.stringify(heading)}`), heading);
+  const closeCommand = async () => { await evaluate("document.getElementById('command-dialog').close()"); await pause(50); };
+  await slash('/help'); await commandDialog('Slash commands');
+  assert.ok(await evaluate("document.querySelectorAll('#command-list button').length >= 27"));
+  // Focus rings must fit inside the scroll viewport on both sides of every list.
+  async function verifyPickerOutline(listId) {
+    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    assert.equal(await evaluate(`(() => {
+      const list = document.getElementById(${JSON.stringify(listId)});
+      const button = list.querySelector('button'); button.focus();
+      const style = getComputedStyle(button), row = button.getBoundingClientRect(), box = list.getBoundingClientRect();
+      const inset = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+      return row.left - inset >= box.left && row.right + inset <= box.left + list.clientWidth;
+    })()`), true, `${listId} focus outline is not clipped`);
+  }
+  await verifyPickerOutline('command-list');
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/slash-help.png`, Buffer.from(result.data, 'base64')));
+  await viewport(390, 700); await verifyPickerOutline('command-list');
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/slash-help-mobile.png`, Buffer.from(result.data, 'base64')));
+  await viewport(1440, 1000);
+  await evaluate("document.getElementById('command-search').value = 'tree'; document.getElementById('command-search').dispatchEvent(new Event('input')); document.querySelector('#command-list [data-value=tree]').click()");
+  await commandDialog('Session tree');
+  await until(() => evaluate("Boolean(document.querySelector('#command-list button'))"), 'tree navigation entries');
+  assert.equal(await evaluate("document.getElementById('command-back').hidden"), false);
+  await click('command-back'); await commandDialog('Slash commands');
+  assert.equal(await evaluate("document.getElementById('command-search').value"), 'tree', 'Back restores command filter');
+  assert.equal(await evaluate("document.querySelector('#command-list [data-value=tree]').disabled"), false, 'restored choices remain usable');
+  // Back must work while a request is still pending, not just after it resolves.
+  await evaluate(`
+    window.originalCommandFetch = window.fetch;
+    window.fetch = (url, options) => {
+      const body = options?.body && JSON.parse(options.body);
+      if (url === '/api/command' && body?.action === 'command-data' && body.kind === 'tree') {
+        return new Promise(resolve => { window.releaseTree = () => resolve(window.originalCommandFetch(url, options)); });
+      }
+      return window.originalCommandFetch(url, options);
+    };
+    document.getElementById('command-search').value = '';
+    document.getElementById('command-search').dispatchEvent(new Event('input'));
+    document.getElementById('command-list').scrollTop = 120;
+    window.commandScroll = document.getElementById('command-list').scrollTop;
+    document.querySelector('#command-list [data-value=tree]').click();
+  `);
+  await commandDialog('Session tree');
+  await until(() => evaluate("typeof window.releaseTree === 'function'"), 'deferred tree request');
+  await click('command-back'); await commandDialog('Slash commands');
+  assert.equal(await evaluate("document.querySelectorAll('#command-list button:disabled').length"), 0, 'Back immediately restores all menu choices during a pending request');
+  assert.equal(await evaluate("document.getElementById('command-list').scrollTop === window.commandScroll"), true, 'Back preserves list scroll');
+  await evaluate("document.querySelector('#command-list [data-value=thinking]').click()");
+  await commandDialog('Thinking level');
+  await click('command-back'); await commandDialog('Slash commands');
+  await evaluate("window.fetch = window.originalCommandFetch; window.releaseTree(); delete window.releaseTree; delete window.originalCommandFetch;");
+  await until(() => evaluate("!document.getElementById('send').disabled"), 'deferred request settles');
+  assert.equal(await evaluate("document.querySelectorAll('#command-list button:disabled').length"), 0, 'old request completion does not disable the restored menu');
+  // Opening Help again replaces the current root instead of adding another level.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await evaluate("document.querySelector('#command-list [data-value=help]').click()");
+    await commandDialog('Slash commands');
+    assert.equal(await evaluate("document.getElementById('command-back').hidden"), true, 'same-level Help navigation has no duplicate parent');
+  }
+  async function verifyListBoundaries(listId) {
+    await evaluate(`document.querySelector('#${listId} button:not(:disabled)').focus()`);
+    const first = await evaluate('document.activeElement.dataset.value');
+    await arrow('ArrowUp'); await arrow('ArrowUp');
+    assert.equal(await evaluate('document.activeElement.dataset.value'), first, `${listId} stops at first item`);
+    await evaluate(`[...document.querySelectorAll('#${listId} button:not(:disabled)')].at(-1).focus()`);
+    const last = await evaluate('document.activeElement.dataset.value');
+    await arrow('ArrowDown'); await arrow('ArrowDown');
+    assert.equal(await evaluate('document.activeElement.dataset.value'), last, `${listId} stops at last item`);
+  }
+  await verifyListBoundaries('command-list');
+  await evaluate("document.getElementById('command-search').value = 'model'; document.getElementById('command-search').dispatchEvent(new Event('input')); document.querySelector('#command-list [data-value=model]').click()");
+  await until(() => evaluate("document.getElementById('model-dialog').open"), 'model dialog from help');
+  assert.equal(await evaluate("document.querySelectorAll('dialog[open]').length"), 1, 'model picker replaces Help instead of stacking dialogs');
+  await verifyListBoundaries('models');
+  await evaluate("document.querySelector('#model-dialog .dialog-back').click()");
+  await until(() => evaluate("!document.getElementById('model-dialog').open"), 'Back from existing model picker');
+  await commandDialog('Slash commands');
+  assert.equal(await evaluate("document.getElementById('command-search').value"), 'model');
+  assert.equal(await evaluate("document.querySelectorAll('#command-list button:disabled').length"), 0, 'Back from model picker restores active choices');
+  for (const [name, id] of [['resume', 'session-dialog'], ['compact', 'compact-dialog'], ['hotkeys', 'help-dialog']]) {
+    await evaluate(`document.getElementById('command-search').value = ${JSON.stringify(name)}; document.getElementById('command-search').dispatchEvent(new Event('input')); document.querySelector('#command-list [data-value=${name}]').click()`);
+    await until(() => evaluate(`document.getElementById('${id}').open`), `${name} dialog from Help`);
+    assert.equal(await evaluate("document.querySelectorAll('dialog[open]').length"), 1, `${name} uses a single visible dialog`);
+    await evaluate(`document.querySelector('#${id} .dialog-back').click()`);
+    await commandDialog('Slash commands');
+    assert.equal(await evaluate("document.getElementById('command-back').hidden"), true, 'sibling dialogs do not accumulate in history');
+  }
+  await evaluate("document.getElementById('command-search').value = 'thinking'; document.getElementById('command-search').dispatchEvent(new Event('input')); document.querySelector('#command-list button').click()");
+  await commandDialog('Thinking level');
+  await evaluate("document.querySelector('#command-list [data-value=high]').click()");
+  await until(() => f.state.thinking === 'high' && evaluate("!document.getElementById('command-dialog').open"), 'thinking selector applies');
+  await slash('/thinking medium'); await until(() => f.state.thinking === 'medium', 'explicit thinking level');
+  await slash('/name Browser command test');
+  await until(() => evaluate("document.getElementById('session-name').textContent === 'Browser command test'"), 'rename command');
+  await slash('/name'); await commandDialog('Rename session');
+  await evaluate("document.getElementById('command-input').value = 'Test session'; document.querySelector('#command-content button[type=submit]').click()");
+  await until(() => evaluate("!document.getElementById('command-dialog').open && document.getElementById('session-name').textContent === 'Test session'"), 'rename dialog');
+  await slash('/model test/faux'); await until(() => evaluate("document.getElementById('model-dialog').open"), 'slash model picker');
+  assert.equal(await evaluate("document.querySelectorAll('#models button').length"), 1);
+  await verifyPickerOutline('models');
+  await evaluate("document.getElementById('model-dialog').close()");
+  await slash('/resume'); await until(() => evaluate("document.getElementById('session-dialog').open && document.querySelector('#session-list button')"), 'slash resume picker');
+  await verifyPickerOutline('session-list');
+  await evaluate("document.getElementById('session-dialog').close()");
+  for (const [text, heading] of [['/tree', 'Session tree'], ['/fork', 'Fork from a user message'], ['/session', 'Session information'], ['/settings', 'Pi settings'], ['/scoped-models', 'Model cycle'], ['/changelog', 'Pi changelog'], ['/export', 'Export session']]) {
+    await slash(text); await commandDialog(heading);
+    await until(() => evaluate("!document.getElementById('command-content').textContent.includes('Loading…') && document.getElementById('command-content').children.length > 0"), heading + ' content');
+    assert.equal(await evaluate("document.getElementById('command-error').hidden"), true);
+    if (text === '/settings') {
+      await evaluate("[...document.querySelectorAll('#command-content button')].find(button => button.textContent === 'Edit in Pi terminal').click()");
+      await commandDialog('Continue in Pi terminal'); await click('command-back'); await commandDialog('Pi settings');
+      assert.equal(await evaluate("document.querySelectorAll('#command-list button:not(:disabled)').length"), 0, 'Back preserves intentionally read-only settings');
+      assert.equal(await evaluate("[...document.querySelectorAll('#command-content button')].find(button => button.textContent === 'Edit in Pi terminal').disabled"), false);
+    }
+    await closeCommand();
+  }
+  await slash('/tools'); await commandDialog('Available tools');
+  await until(() => evaluate("Boolean(document.querySelector('#command-list [data-value=bash]'))"), 'tools loaded');
+  await evaluate("document.querySelector('#command-list [data-value=bash]').click()");
+  await evaluate("[...document.querySelectorAll('#command-content button')].find(button => button.textContent === 'Apply tool selection').click()");
+  await until(() => f.state.activeTools.length === 1, 'tool selection applied');
+  assert.deepEqual(f.state.activeTools, ['read']);
+  await until(() => evaluate("!document.getElementById('command-dialog').open"), 'tools dialog closes');
+  await slash('/login'); await commandDialog('Choose a provider');
+  await until(() => evaluate("Boolean(document.querySelector('#command-list button'))"), 'provider list');
+  await evaluate("document.querySelector('#command-list button').click()");
+  await commandDialog('Continue in Pi terminal');
+  await click('command-back'); await commandDialog('Choose a provider');
+  await evaluate("document.querySelector('#command-list button').click()");
+  await commandDialog('Continue in Pi terminal');
+  await evaluate("[...document.querySelectorAll('#command-content button')].find(button => button.textContent === 'Prepare in terminal').click()");
+  await until(() => f.state.editor === '/login test', 'terminal command prepared');
+  assert.equal(f.state.calls.filter(c => c[0] === 'submit').length, 2, 'built-ins never reach the model');
+  await closeCommand();
+  await slash('/does-not-exist');
+  await until(() => evaluate("document.getElementById('alerts').textContent.includes('Unknown command')"), 'unknown command error');
+  assert.equal(await input(), '/does-not-exist', 'failed commands preserve the composer');
+  await evaluate("document.getElementById('prompt').value = '/thi'; document.getElementById('prompt').focus(); document.getElementById('prompt').dispatchEvent(new Event('input'))");
+  assert.equal(await evaluate("document.getElementById('command-suggestions').hidden"), false);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  assert.equal(await input(), '/thinking ');
+  await evaluate("document.getElementById('prompt').value = '/'; document.getElementById('prompt').dispatchEvent(new Event('input'))");
+  await arrow('ArrowUp');
+  assert.equal(await evaluate("document.getElementById('prompt').getAttribute('aria-activedescendant')"), 'slash-option-0');
+  const suggestionCount = await evaluate("document.querySelectorAll('#command-suggestions button').length");
+  for (let index = 0; index < suggestionCount + 2; index++) await arrow('ArrowDown');
+  assert.equal(await evaluate("document.getElementById('prompt').getAttribute('aria-activedescendant')"), `slash-option-${suggestionCount - 1}`);
+  for (let index = 0; index < suggestionCount + 2; index++) await arrow('ArrowUp');
+  assert.equal(await evaluate("document.getElementById('prompt').getAttribute('aria-activedescendant')"), 'slash-option-0');
+  const abortCount = f.state.calls.filter(call => call[0] === 'abort').length;
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  assert.equal(await evaluate("document.getElementById('command-suggestions').hidden"), true);
+  assert.equal(f.state.calls.filter(call => call[0] === 'abort').length, abortCount, 'Escape dismisses suggestions before aborting');
+  await slash('/quit'); await commandDialog('Quit Pi'); await closeCommand();
+  assert.equal(f.state.calls.some(call => call[0] === 'shutdown'), false, 'dismissal never shuts down Pi');
+  results.push({ test: 'Slash command discovery, shared pickers, unclipped focus rings on desktop/mobile, explicit thinking, rename, tools, session views, terminal handoff, autocomplete, and unknown-command safety', status: 'pass' });
   const section = '6-tools-delegation-policies-and-extensibility';
   const filler = Array(35).fill('Paragraph for anchor scrolling.\n').join('\n');
   const tokenlessPreview = `${server.origin}/preview.html?${new URLSearchParams({ path: 'root/other notes.md', cwd: `${profile}/explorer` })}#destination`;
