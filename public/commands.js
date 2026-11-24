@@ -19,41 +19,69 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
   const back = document.getElementById('command-back');
   const navigation = [];
   let dialogSession, generation = 0, busy = false, active = 0, matches = [], dismissed;
+  let releaseAction, atCommandMenu = false, externalDialog, ignoredCloseEvents = 0;
   const catalog = () => getView()?.commands || builtinCommands;
   const fail = problem => { error.textContent = problem.message; error.hidden = false; };
   const close = () => dialog.close();
-  dialog.addEventListener('close', () => { if (dialog.open) return; generation++; dialogSession = undefined; navigation.length = 0; back.hidden = true; prompt.focus(); });
+  dialog.addEventListener('close', () => {
+    if (ignoredCloseEvents) { ignoredCloseEvents--; return; }
+    if (dialog.open) return;
+    releaseAction?.(); generation++; dialogSession = undefined; navigation.length = 0; back.hidden = true; prompt.focus();
+  });
   back.onclick = () => {
     const previous = navigation.pop();
     if (!previous) return;
+    releaseAction?.();
     generation++; busy = false;
+    atCommandMenu = previous.atCommandMenu;
     title.textContent = previous.title; content.replaceChildren(...previous.children);
     error.hidden = true; back.hidden = !navigation.length;
     (previous.focus?.isConnected ? previous.focus : content.querySelector('input, button'))?.focus({ preventScroll: true });
     for (const [element, scrollTop] of previous.scroll) element.scrollTop = scrollTop;
     dialog.scrollTop = previous.dialogScroll;
   };
-  const open = heading => {
-    if (dialog.open) {
-      navigation.push({ title: title.textContent, children: [...content.childNodes], focus: document.activeElement,
+  const open = (heading, { menu = false, child = false } = {}) => {
+    // Restore temporary locks before saving a view. History contains its normal
+    // enabled/disabled state, even when Back is pressed before a load completes.
+    releaseAction?.();
+    if (menu) navigation.length = 0;
+    else if (dialog.open && (atCommandMenu || child)) {
+      navigation.push({ atCommandMenu, title: title.textContent, children: [...content.childNodes], focus: document.activeElement,
         scroll: [...content.querySelectorAll('.model-list')].map(element => [element, element.scrollTop]), dialogScroll: dialog.scrollTop });
     }
+    // Other command pages replace the current depth instead of growing history.
+    atCommandMenu = menu;
     generation++; busy = false; dialogSession = getView()?.session.id;
     title.textContent = heading; content.replaceChildren(); error.hidden = true;
     back.hidden = !navigation.length;
     if (!dialog.open) dialog.showModal();
+    dialog.scrollTop = 0;
     hideSuggestions();
   };
   async function showExisting(id, show) {
     const child = document.getElementById(id);
-    let returnButton = child.querySelector('.dialog-back');
-    if (dialog.open && !returnButton) {
-      returnButton = node('button', '← Back', 'dialog-back'); returnButton.type = 'button';
-      returnButton.onclick = () => child.close();
-      child.querySelector('.dialog-head').prepend(returnButton);
-      child.addEventListener('close', () => { returnButton.remove(); }, { once: true });
-    }
-    await show();
+    if (!dialog.open) { await show(); return; }
+    releaseAction?.(); generation++;
+    const focus = document.activeElement;
+    const scroll = [...content.querySelectorAll('.model-list')].map(element => [element, element.scrollTop]);
+    const dialogScroll = dialog.scrollTop;
+    externalDialog = child;
+    ignoredCloseEvents++; dialog.close();
+    const returnButton = node('button', '← Back', 'dialog-back'); returnButton.type = 'button';
+    returnButton.onclick = () => child.close();
+    child.querySelector('.dialog-head').prepend(returnButton);
+    const restore = () => {
+      child.removeEventListener('close', restore); returnButton.remove();
+      if (externalDialog !== child) return;
+      externalDialog = undefined;
+      if (dialogSession !== getView()?.session.id) { navigation.length = 0; dialogSession = undefined; return; }
+      dialog.showModal();
+      focus?.focus({ preventScroll: true });
+      for (const [element, scrollTop] of scroll) element.scrollTop = scrollTop;
+      dialog.scrollTop = dialogScroll;
+    };
+    child.addEventListener('close', restore);
+    try { await show(); } finally { if (!child.open) restore(); }
   }
   const send = async (action, payload, sessionId = dialogSession || getView()?.session.id) => {
     if (sessionId !== getView()?.session.id) throw new Error('The active session changed. Open the command again.');
@@ -69,13 +97,18 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     const buttons = [...content.querySelectorAll('button')];
     const disabled = buttons.map(button => button.disabled);
     buttons.forEach(button => { button.disabled = true; });
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      buttons.forEach((button, index) => { button.disabled = disabled[index]; });
+      if (releaseAction === release) { releaseAction = undefined; busy = false; }
+    };
+    releaseAction = release;
     try { await callback(); }
     catch (problem) { if (version === generation) fail(problem); }
     finally {
-      buttons.forEach((button, index) => { button.disabled = disabled[index]; });
-      if (version === generation) {
-        busy = false;
-      }
+      release();
     }
   };
   const button = (label, callback, className = '') => {
@@ -94,12 +127,6 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
       const first = rows.querySelector('button:not(:disabled)');
       if (event.key === 'ArrowDown') { event.preventDefault(); first?.focus(); }
       if (event.key === 'Enter') { event.preventDefault(); first?.click(); }
-    };
-    rows.onkeydown = event => {
-      if (!['ArrowUp', 'ArrowDown'].includes(event.key) || event.isComposing) return;
-      const buttons = [...rows.querySelectorAll('button:not(:disabled)')];
-      const index = buttons.indexOf(document.activeElement);
-      event.preventDefault(); buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
     };
     content.append(caption, input, rows); filter(); input.focus(); return filter;
   }
@@ -126,8 +153,8 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     form.onsubmit = event => { event.preventDefault(); void act(async () => { await callback(input.value); close(); }); };
     input.focus(); input.select();
   }
-  function terminal(text) {
-    open('Continue in Pi terminal');
+  function terminal(text, child = false) {
+    open('Continue in Pi terminal', { child });
     paragraph('This command uses Pi’s terminal workflow. Prepare it in the terminal, then press Enter there. The browser remains connected unless the command reloads or shuts down Pi.');
     content.append(node('pre', text));
     content.append(button('Copy command', () => copyValue('Command', text)), button('Prepare in terminal', async () => {
@@ -136,7 +163,7 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     }, 'primary'));
   }
   function showCommands() {
-    open('Slash commands');
+    open('Slash commands', { menu: true });
     paragraph('Choose a command, or type / in the composer. Commands marked “Pi terminal” use its interactive workflow.');
     list(catalog().map(item => ({ value: item.name, title: `/${item.name} ${item.argumentsHint || ''}`.trim(), description: `${item.description}${item.mode === 'terminal' ? ' · Pi terminal' : item.mode === 'prompt' ? ' · Sends a prompt' : ''}` })), async item => {
       const descriptor = catalog().find(command => command.name === item.value);
@@ -215,7 +242,7 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     if (descriptor.mode === 'terminal') {
       if (name === 'login' && !args) {
         open('Choose a provider');
-        await load('providers', data => list(data.providers.map(provider => ({ value: provider.id, title: provider.name, description: provider.id })), item => terminal(`/login ${item.value}`), { label: 'Filter providers' }));
+        await load('providers', data => list(data.providers.map(provider => ({ value: provider.id, title: provider.name, description: provider.id })), item => terminal(`/login ${item.value}`, true), { label: 'Filter providers' }));
       } else terminal(text);
       return true;
     }
@@ -257,14 +284,14 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
         await load('settings', data => {
           paragraph('Effective settings for this session. Use Pi’s settings menu to change them.');
           list(data.settings.map(item => ({ value: item.name, title: item.name, description: String(item.value), disabled: true })), () => {}, { label: 'Filter settings', empty: 'Pi is using its default settings.' });
-          content.append(button('Edit in Pi terminal', () => terminal('/settings')));
+          content.append(button('Edit in Pi terminal', () => terminal('/settings', true)));
         }); break;
       case 'scoped-models':
         open('Model cycle');
         await load('scoped-models', data => {
           paragraph('Models included in Pi’s terminal model cycle. Choose one here or change the cycle in Pi.');
           list(data.models.map(model => ({ value: `${model.provider}/${model.modelId}`, title: model.name, description: `${model.provider}/${model.modelId} · ${model.thinkingLevel || 'default thinking'}`, model })), async item => { await send('model', { provider: item.model.provider, modelId: item.model.modelId }); close(); }, { label: 'Filter scoped models', empty: 'No scope configured. All available models can be used.' });
-          content.append(button('Configure in Pi terminal', () => terminal('/scoped-models')));
+          content.append(button('Configure in Pi terminal', () => terminal('/scoped-models', true)));
         }); break;
       case 'changelog': open('Pi changelog'); await load('changelog', data => content.append(prose(data.text))); break;
       case 'quit': confirm('Quit Pi', 'This stops Pi and disconnects every browser tab attached to this web server.', 'quit', { confirm: true }); break;
@@ -295,7 +322,7 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
     if (event.isComposing || suggestions.hidden || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return false;
     if (event.key === 'Escape') { dismissed = prompt.value; hideSuggestions(); event.preventDefault(); event.stopPropagation(); return true; }
     if (['ArrowDown', 'ArrowUp'].includes(event.key)) {
-      active = (active + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length;
+      active = Math.max(0, Math.min(matches.length - 1, active + (event.key === 'ArrowDown' ? 1 : -1)));
       updateSuggestions(); event.preventDefault(); return true;
     }
     if (event.key === 'Tab' || (event.key === 'Enter' && parseSlash(prompt.value)?.name !== matches[active]?.name)) {
@@ -309,6 +336,7 @@ export function createCommands({ prompt, getView, request, showModels, showSessi
   return {
     execute, showCommands, keydown, hideSuggestions,
     update() {
+      if (externalDialog && dialogSession !== getView()?.session.id) externalDialog.close();
       if (dialog.open && dialogSession !== getView()?.session.id) close();
       updateSuggestions();
     },

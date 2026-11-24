@@ -1,5 +1,13 @@
 // The session, model and slash-command lists share the same rows and filtering.
 export function renderChoices(container, choices, { query = '', empty = 'No matches.', onSelect } = {}) {
+  container.onkeydown = event => {
+    if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    const items = [...container.querySelectorAll('button:not(:disabled)')];
+    const index = items.indexOf(document.activeElement);
+    if (index < 0) return;
+    event.preventDefault();
+    items[Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+  };
   const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   container.replaceChildren();
   const buttons = [];

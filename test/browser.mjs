@@ -508,11 +508,67 @@ try {
   await click('command-back'); await commandDialog('Slash commands');
   assert.equal(await evaluate("document.getElementById('command-search').value"), 'tree', 'Back restores command filter');
   assert.equal(await evaluate("document.querySelector('#command-list [data-value=tree]').disabled"), false, 'restored choices remain usable');
+  // Back must work while a request is still pending, not just after it resolves.
+  await evaluate(`
+    window.originalCommandFetch = window.fetch;
+    window.fetch = (url, options) => {
+      const body = options?.body && JSON.parse(options.body);
+      if (url === '/api/command' && body?.action === 'command-data' && body.kind === 'tree') {
+        return new Promise(resolve => { window.releaseTree = () => resolve(window.originalCommandFetch(url, options)); });
+      }
+      return window.originalCommandFetch(url, options);
+    };
+    document.getElementById('command-search').value = '';
+    document.getElementById('command-search').dispatchEvent(new Event('input'));
+    document.getElementById('command-list').scrollTop = 120;
+    window.commandScroll = document.getElementById('command-list').scrollTop;
+    document.querySelector('#command-list [data-value=tree]').click();
+  `);
+  await commandDialog('Session tree');
+  await until(() => evaluate("typeof window.releaseTree === 'function'"), 'deferred tree request');
+  await click('command-back'); await commandDialog('Slash commands');
+  assert.equal(await evaluate("document.querySelectorAll('#command-list button:disabled').length"), 0, 'Back immediately restores all menu choices during a pending request');
+  assert.equal(await evaluate("document.getElementById('command-list').scrollTop === window.commandScroll"), true, 'Back preserves list scroll');
+  await evaluate("document.querySelector('#command-list [data-value=thinking]').click()");
+  await commandDialog('Thinking level');
+  await click('command-back'); await commandDialog('Slash commands');
+  await evaluate("window.fetch = window.originalCommandFetch; window.releaseTree(); delete window.releaseTree; delete window.originalCommandFetch;");
+  await until(() => evaluate("!document.getElementById('send').disabled"), 'deferred request settles');
+  assert.equal(await evaluate("document.querySelectorAll('#command-list button:disabled').length"), 0, 'old request completion does not disable the restored menu');
+  // Opening Help again replaces the current root instead of adding another level.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await evaluate("document.querySelector('#command-list [data-value=help]').click()");
+    await commandDialog('Slash commands');
+    assert.equal(await evaluate("document.getElementById('command-back').hidden"), true, 'same-level Help navigation has no duplicate parent');
+  }
+  async function verifyListBoundaries(listId) {
+    await evaluate(`document.querySelector('#${listId} button:not(:disabled)').focus()`);
+    const first = await evaluate('document.activeElement.dataset.value');
+    await arrow('ArrowUp'); await arrow('ArrowUp');
+    assert.equal(await evaluate('document.activeElement.dataset.value'), first, `${listId} stops at first item`);
+    await evaluate(`[...document.querySelectorAll('#${listId} button:not(:disabled)')].at(-1).focus()`);
+    const last = await evaluate('document.activeElement.dataset.value');
+    await arrow('ArrowDown'); await arrow('ArrowDown');
+    assert.equal(await evaluate('document.activeElement.dataset.value'), last, `${listId} stops at last item`);
+  }
+  await verifyListBoundaries('command-list');
   await evaluate("document.getElementById('command-search').value = 'model'; document.getElementById('command-search').dispatchEvent(new Event('input')); document.querySelector('#command-list [data-value=model]').click()");
   await until(() => evaluate("document.getElementById('model-dialog').open"), 'model dialog from help');
+  assert.equal(await evaluate("document.querySelectorAll('dialog[open]').length"), 1, 'model picker replaces Help instead of stacking dialogs');
+  await verifyListBoundaries('models');
   await evaluate("document.querySelector('#model-dialog .dialog-back').click()");
   await until(() => evaluate("!document.getElementById('model-dialog').open"), 'Back from existing model picker');
+  await commandDialog('Slash commands');
   assert.equal(await evaluate("document.getElementById('command-search').value"), 'model');
+  assert.equal(await evaluate("document.querySelectorAll('#command-list button:disabled').length"), 0, 'Back from model picker restores active choices');
+  for (const [name, id] of [['resume', 'session-dialog'], ['compact', 'compact-dialog'], ['hotkeys', 'help-dialog']]) {
+    await evaluate(`document.getElementById('command-search').value = ${JSON.stringify(name)}; document.getElementById('command-search').dispatchEvent(new Event('input')); document.querySelector('#command-list [data-value=${name}]').click()`);
+    await until(() => evaluate(`document.getElementById('${id}').open`), `${name} dialog from Help`);
+    assert.equal(await evaluate("document.querySelectorAll('dialog[open]').length"), 1, `${name} uses a single visible dialog`);
+    await evaluate(`document.querySelector('#${id} .dialog-back').click()`);
+    await commandDialog('Slash commands');
+    assert.equal(await evaluate("document.getElementById('command-back').hidden"), true, 'sibling dialogs do not accumulate in history');
+  }
   await evaluate("document.getElementById('command-search').value = 'thinking'; document.getElementById('command-search').dispatchEvent(new Event('input')); document.querySelector('#command-list button').click()");
   await commandDialog('Thinking level');
   await evaluate("document.querySelector('#command-list [data-value=high]').click()");
@@ -534,6 +590,12 @@ try {
     await slash(text); await commandDialog(heading);
     await until(() => evaluate("!document.getElementById('command-content').textContent.includes('Loading…') && document.getElementById('command-content').children.length > 0"), heading + ' content');
     assert.equal(await evaluate("document.getElementById('command-error').hidden"), true);
+    if (text === '/settings') {
+      await evaluate("[...document.querySelectorAll('#command-content button')].find(button => button.textContent === 'Edit in Pi terminal').click()");
+      await commandDialog('Continue in Pi terminal'); await click('command-back'); await commandDialog('Pi settings');
+      assert.equal(await evaluate("document.querySelectorAll('#command-list button:not(:disabled)').length"), 0, 'Back preserves intentionally read-only settings');
+      assert.equal(await evaluate("[...document.querySelectorAll('#command-content button')].find(button => button.textContent === 'Edit in Pi terminal').disabled"), false);
+    }
     await closeCommand();
   }
   await slash('/tools'); await commandDialog('Available tools');
@@ -562,6 +624,13 @@ try {
   await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
   assert.equal(await input(), '/thinking ');
   await evaluate("document.getElementById('prompt').value = '/'; document.getElementById('prompt').dispatchEvent(new Event('input'))");
+  await arrow('ArrowUp');
+  assert.equal(await evaluate("document.getElementById('prompt').getAttribute('aria-activedescendant')"), 'slash-option-0');
+  const suggestionCount = await evaluate("document.querySelectorAll('#command-suggestions button').length");
+  for (let index = 0; index < suggestionCount + 2; index++) await arrow('ArrowDown');
+  assert.equal(await evaluate("document.getElementById('prompt').getAttribute('aria-activedescendant')"), `slash-option-${suggestionCount - 1}`);
+  for (let index = 0; index < suggestionCount + 2; index++) await arrow('ArrowUp');
+  assert.equal(await evaluate("document.getElementById('prompt').getAttribute('aria-activedescendant')"), 'slash-option-0');
   const abortCount = f.state.calls.filter(call => call[0] === 'abort').length;
   await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   assert.equal(await evaluate("document.getElementById('command-suggestions').hidden"), true);
