@@ -6,7 +6,7 @@
 <div class="app">
   <header class="topbar"><div class="brand"><span class="mark">π</span><div><strong>Pi workspace</strong><span class="eyebrow">PI SESSION</span></div></div><div class="connection"><span id="connection-dot" class="dot"></span><span id="connection">Connecting…</span></div><button id="sessions" class="quiet" data-control>Sessions</button><button id="help" class="quiet" title="Keyboard shortcuts">? <span>Help</span></button></header>
   <div class="workspace">
-    <aside class="sidebar" aria-label="Session information">
+    <aside id="sidebar" class="sidebar" aria-label="Session information">
       <section class="session-meta"><button id="explorer-toggle" class="quiet eyebrow" type="button" aria-expanded="false" aria-controls="file-explorer" disabled>WORKING DIRECTORY</button><button id="cwd" class="quiet session-copy" aria-label="Copy working directory">Connecting to Pi…</button><section id="file-explorer" aria-label="File explorer" hidden>
         <div class="explorer-toolbar"><button id="explorer-up" type="button" title="Parent directory" aria-label="Parent directory">↑ Up</button><button id="explorer-home" type="button" title="Return to working directory">Working directory</button><button id="explorer-refresh" type="button" title="Refresh directory" aria-label="Refresh directory">↻</button></div>
         <div id="explorer-path" class="mono" role="navigation" aria-label="Current directory breadcrumbs"></div>
@@ -17,6 +17,7 @@
       <section class="task-section"><div class="section-title"><h2>Available tools</h2></div><div id="tasks" class="task-list"><p class="muted">Loading session tools.</p></div></section>
       <div class="sidebar-foot"><span class="dot saved"></span> Shared with the Pi terminal</div>
     </aside>
+    <div id="sidebar-resize" role="separator" tabindex="0" aria-label="Resize sidebar" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Arrow keys to adjust · Double-click to reset"><span aria-hidden="true">↔</span></div>
     <main>
       <header class="conversation-bar"><div><span class="eyebrow">CONVERSATION</span><h1 id="conversation-title">Main</h1></div><div class="toolbar"><button id="model" data-control title="Choose model">Select model <span>⌄</span></button><button id="thinking" data-control title="Cycle reasoning effort (Alt+T)">Thinking: off</button><button id="compact" data-control title="Compact older context">Compact</button></div></header>
       <div id="alerts" role="status" aria-live="polite"></div>

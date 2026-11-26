@@ -1,0 +1,3 @@
+body { margin:0; padding:12px; font-family:system-ui,sans-serif; overflow:auto; }
+#diagram { text-align:center; }
+#diagram svg { display:block; margin:auto; max-width:100%; height:auto; }

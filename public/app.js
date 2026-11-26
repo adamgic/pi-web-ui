@@ -1,11 +1,13 @@
 import { prose as renderProse } from './prose.js';
 import { usageOf, transcriptOf, formatDuration } from './view.js';
 import { createExplorer } from './explorer.js';
-import { copyValue, copyableCode } from './copy.js';
+import { copyValue, copyableCode, copyButton } from './copy.js';
+import { setupSidebar } from './sidebar.js';
 import { renderChoices } from './picker.js';
 import { createCommands } from './commands.js';
 
 const $ = id => document.getElementById(id);
+setupSidebar();
 const fragment = new URLSearchParams(location.hash.slice(1));
 const token = fragment.get('token') || sessionStorage.getItem('pi-web-token');
 if (fragment.has('token')) { sessionStorage.setItem('pi-web-token', token); history.replaceState(null, '', location.pathname); }
@@ -41,11 +43,12 @@ function el(tag, text, className) {
   return node;
 }
 function prose(text) { return renderProse(text, { token, cwd: view?.session.cwd }); }
-function detail(key, title, contents, className) {
+function detail(key, title, contents, className, copyText, copyLabel) {
   const node = el('details', undefined, className);
   node.open = opened.get(key) ?? expanded;
   const summary = el('summary');
   summary.append(title);
+  if (copyText !== undefined) summary.append(copyButton(copyLabel, copyText, 'quiet copy-section'));
   node.append(summary, contents);
   node.addEventListener('toggle', () => { if (node.isConnected) opened.set(key, node.open); });
   return node;
@@ -65,24 +68,16 @@ function renderTranscript() {
       if (item.output) body.append(copyableCode(el('pre', item.output)));
       if (item.truncated) body.append(el('p', item.truncated, 'muted'));
       fragment.append(detail(item.key, title, body, `tool-card ${item.status === 'error' ? 'error' : ''}`));
-    } else if (item.type === 'compaction') fragment.append(detail(item.key, el('span', 'Context summary'), prose(item.text), 'thinking-card'));
+    } else if (item.type === 'compaction') fragment.append(detail(item.key, el('span', 'Context summary'), prose(item.text), 'thinking-card', item.text, 'context summary'));
     else {
       const message = el('article', undefined, `message ${item.type}`);
       const header = el('header', item.type === 'user' ? 'You' : item.type === 'assistant' ? `Pi${item.streaming ? ' · streaming' : ''}` : 'Context');
       message.append(header);
-      if (item.thinking) message.append(detail(`${item.key}:thinking`, el('span', 'Reasoning'), prose(item.thinking), 'thinking-card'));
+      if (item.thinking) message.append(detail(`${item.key}:thinking`, el('span', 'Reasoning'), prose(item.thinking), 'thinking-card', item.thinking, 'reasoning'));
       if (item.text) message.append(item.type === 'user' ? el('div', item.text, 'prose') : prose(item.text));
       if (item.error) message.append(el('p', item.error, 'danger'));
-      if (item.type === 'assistant' && item.text) {
-        const copy = el('button', undefined, 'quiet copy-response');
-        copy.setAttribute('aria-label', 'Copy response');
-        copy.title = 'Copy response';
-        const icon = el('span', undefined, 'copy-icon');
-        icon.setAttribute('aria-hidden', 'true');
-        copy.append(icon);
-        copy.onclick = () => copyValue('Response Markdown', item.text);
-        message.append(copy);
-      }
+      if (item.text) message.append(copyButton(item.type === 'assistant' ? 'response' : 'message', item.text,
+        `quiet copy-content ${item.type === 'assistant' ? 'copy-response' : 'copy-message'}`, item.type === 'assistant' ? 'Response Markdown' : 'Message'));
       fragment.append(message);
     }
   }

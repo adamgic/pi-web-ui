@@ -12,6 +12,12 @@ const assets = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/preview.html', ['preview.html', 'text/html; charset=utf-8']],
   ['/preview.js', ['preview.js', 'text/javascript; charset=utf-8']],
+  ['/sidebar.js', ['sidebar.js', 'text/javascript; charset=utf-8']],
+  ['/diagrams.js', ['diagrams.js', 'text/javascript; charset=utf-8']],
+  ['/diagram.html', ['diagram.html', 'text/html; charset=utf-8']],
+  ['/diagram-frame.js', ['diagram-frame.js', 'text/javascript; charset=utf-8']],
+  ['/diagram.css', ['diagram.css', 'text/css; charset=utf-8']],
+  ['/vendor/mermaid/mermaid.min.js', ['vendor/mermaid/mermaid.min.js', 'text/javascript; charset=utf-8']],
   ['/preview-links.js', ['preview-links.js', 'text/javascript; charset=utf-8']],
   ['/preview.css', ['preview.css', 'text/css; charset=utf-8']],
   ['/highlighting.js', ['highlighting.js', 'text/javascript; charset=utf-8']],
@@ -230,6 +236,7 @@ export async function startServer(bridge, { port = 0 } = {}) {
       const asset = assets.get(url.pathname);
       if (req.method !== 'GET' || !asset) throw error(404, 'Not found.');
       const content = await readFile(new URL(`../public/${asset[0]}`, import.meta.url));
+      if (url.pathname === '/diagram.html') res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
       res.writeHead(200, { 'Content-Type': asset[1] }); res.end(content);
     } catch (e) {
       if (!res.headersSent) json(res, e.status || 500, { error: e.message });

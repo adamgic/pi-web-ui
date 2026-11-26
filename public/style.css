@@ -214,6 +214,23 @@
 #run-timing { margin-left: auto; margin-right: 12px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
 .statusbar { flex-wrap: wrap; gap: 6px; }
 
+.copy-content { display:flex; margin-left:auto; align-items:center; justify-content:center; width:30px; height:30px; padding:5px; }
+.copy-section { float:right; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:4px; margin:-5px 0 -5px 12px; opacity:0; }
+.thinking-card:hover > summary .copy-section, .thinking-card:focus-within > summary .copy-section { opacity:1; }
+.copy-message { opacity:0; }
+.message:hover > .copy-message, .message:focus-within > .copy-message { opacity:1; }
+@media(hover:none) { .copy-section, .copy-message { opacity:1; } }
+
+.workspace > .sidebar { grid-column:1; grid-row:1; min-width:0; }
+.workspace > main { grid-column:3; grid-row:1; }
+#sidebar-resize { grid-column:2; grid-row:1; position:relative; z-index:6; width:12px; margin-left:-6px; cursor:ew-resize; touch-action:none; }
+#sidebar-resize::before { content:''; position:absolute; left:5px; top:0; bottom:0; width:2px; background:var(--accent); opacity:0; }
+#sidebar-resize span { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); border:1px solid var(--line); border-radius:5px; padding:3px; background:var(--panel); color:var(--accent); font-size:19px; opacity:0; }
+#sidebar-resize:hover::before, #sidebar-resize:hover span, #sidebar-resize:focus-visible::before, #sidebar-resize:focus-visible span, .resizing-sidebar #sidebar-resize::before, .resizing-sidebar #sidebar-resize span { opacity:1; }
+.resizing-sidebar, .resizing-sidebar * { cursor:ew-resize!important; user-select:none!important; }
+@media(min-width:701px) { .workspace { grid-template-columns:var(--sidebar-width,260px) 0 minmax(0,1fr); } }
+@media(max-width:700px) { #sidebar-resize, .workspace > .sidebar { display:none; } .workspace > main { grid-column:1; } }
+
 /* Slash commands reuse the session/model picker and native dialog surfaces. */
 .model-list { padding: 6px; scrollbar-gutter: stable; }
 .dialog-head .dialog-back { font-size: 12px; white-space: nowrap; padding: 6px 8px; }

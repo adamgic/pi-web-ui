@@ -23,15 +23,23 @@ function showToast(message) {
   }, 3000);
 }
 
-export function copyableCode(pre, source = () => pre.textContent) {
-  const block = document.createElement('div'); block.className = 'code-block';
+export function copyButton(label, source, className = 'copy-content', toastLabel = label) {
   const button = document.createElement('button');
-  button.type = 'button'; button.className = 'copy-code';
-  button.setAttribute('aria-label', 'Copy code'); button.title = 'Copy code';
+  button.type = 'button'; button.className = className;
+  button.setAttribute('aria-label', `Copy ${label}`); button.title = `Copy ${label}`;
   const icon = document.createElement('span'); icon.className = 'copy-icon';
   icon.setAttribute('aria-hidden', 'true'); button.append(icon);
+  button.onclick = event => {
+    event.preventDefault(); event.stopPropagation();
+    void copyValue(toastLabel, typeof source === 'function' ? source() : source);
+  };
+  return button;
+}
+
+export function copyableCode(pre, source = () => pre.textContent) {
+  const block = document.createElement('div'); block.className = 'code-block';
+  const button = copyButton('code', source, 'copy-code', 'Code');
   // Keep controls outside <pre>, so selecting or copying code never includes UI text.
-  button.onclick = () => copyValue('Code', typeof source === 'function' ? source() : source);
   block.append(pre, button);
   return block;
 }
