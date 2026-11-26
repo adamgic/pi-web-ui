@@ -90,6 +90,13 @@ Prompt history comes from the active session and includes prompts accepted from 
 
 Light and dark appearance follow the OS/browser preference, including live changes. The page fits normal window sizes; the transcript scrolls within its panel. At widths of 440px or less, or heights of 560px or less, vertical page scrolling is enabled.
 
+On desktop, hover over the divider between the sidebar and conversation to see
+the horizontal resize cursor and double-headed arrow. Drag to change their widths.
+The sidebar width is remembered in this browser and constrained to keep the
+conversation usable. Focus the divider and use Left/Right to resize, Home/End for
+the limits, or Enter to reset. Double-click also restores the default width; Escape
+cancels an active drag. The sidebar and divider are hidden on narrow screens.
+
 The footer shows an animated gradient through “Thinking…” while Pi is working, and “Compacting…” during compaction. It returns to “Ready” when idle. Reduced-motion settings disable the animation while retaining the activity label.
 
 ## Authentication and terminal interactions
@@ -214,6 +221,31 @@ right. Clicking it copies the entire snippet, preserving indentation and line
 breaks without Markdown fences or interface text. Source previews copy the full
 file in either coloring mode. The controls also appear on keyboard focus and
 remain visible on touch devices; copy success or failure is shown in a toast.
+
+Reasoning blocks and context summaries have the same copy icon in their heading,
+including while collapsed. Copying preserves their full original Markdown and
+does not expand or collapse the block. User messages and other visible message
+text also have copy controls. Icons appear on hover or keyboard focus and stay
+visible on touch devices; streamed reasoning copies the text received so far.
+
+Markdown previews render fenced `mermaid` diagrams locally with the bundled
+Mermaid 12.3.0 renderer, including sequence diagrams and flowcharts:
+
+````markdown
+```mermaid
+sequenceDiagram
+    Browser->>Pi: Send prompt
+    Pi-->>Browser: Stream response
+```
+````
+
+Backtick and tilde fences are supported. Each diagram includes an expandable
+**Diagram source** with a copy control, and **View source** still shows the exact
+Markdown file. Invalid diagrams retain their source and show an error in place
+of the diagram. Diagrams follow light/dark appearance and render in sandboxed
+frames without session credentials or network access. No CDN is used. The
+renderer limits diagrams to 50,000 characters and 500 edges; oversized diagrams
+remain available as source. Other fenced languages continue to display as code.
 
 - Python: indentation levels plus nested parentheses, lists, and dictionaries.
 - JSON: root keys use level 0, values level 1, nested keys level 2, their values

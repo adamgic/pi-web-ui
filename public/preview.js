@@ -1,6 +1,7 @@
 import { highlightedCode, languageFor, savedHighlightMode, saveHighlightMode, colorNames } from './highlighting.js';
 import { prose } from './prose.js';
 import { readPreviewFragment } from './preview-links.js';
+import { renderDiagrams } from './diagrams.js';
 const params = new URLSearchParams(location.search);
 const fragment = readPreviewFragment(location.hash);
 const token = fragment.token || sessionStorage.getItem('pi-web-token');
@@ -35,7 +36,9 @@ try {
       const chip = document.createElement('span'); chip.className = `nest-color-${index}`;
       chip.textContent = `${index} ${name}`; legend.append(chip);
     });
+    let disposeDiagrams;
     const render = () => {
+      disposeDiagrams?.();
       document.getElementById('highlight-controls').hidden = !source;
       legend.hidden = mode.value !== 'nesting' || language === 'plaintext';
       document.getElementById('highlight-note').textContent = mode.value === 'standard'
@@ -52,7 +55,10 @@ try {
         frame.setAttribute('sandbox', 'allow-scripts'); frame.src = file.htmlUrl + location.hash;
         content.replaceChildren(frame);
       }
-      else content.replaceChildren(prose(file.content, { token, cwd: remote ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) || '/', headingAnchors: true }));
+      else {
+        content.replaceChildren(prose(file.content, { token, cwd: remote ? file.path : file.path.slice(0, file.path.lastIndexOf('/')) || '/', headingAnchors: true, diagrams: true }));
+        disposeDiagrams = renderDiagrams(content);
+      }
       if (!source) requestAnimationFrame(scrollToAnchor);
     };
     mode.onchange = () => { saveHighlightMode(mode.value); render(); };

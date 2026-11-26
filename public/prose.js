@@ -88,7 +88,7 @@ function inline(parent, text, options) {
 export function prose(text, options = {}) {
   const node = el('div', undefined, 'prose');
   const headingIds = new Set();
-  let code, codeSource, paragraph, list, math, mathEnd;
+  let code, codeSource, fence, paragraph, list, math, mathEnd;
   const rawLines = String(text || '').split('\n');
   const lines = rawLines.map(line => line.replace(/\r$/, ''));
   for (let row = 0; row < lines.length; row++) {
@@ -107,9 +107,13 @@ export function prose(text, options = {}) {
       math = []; mathEnd = line.trim() === '$$' ? '$$' : '\\]';
       paragraph = undefined; list = undefined; continue;
     }
-    if (/^\s*```/.test(line)) {
-      if (code) code = undefined;
-      else {
+    const fenceMatch = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fenceMatch && (!code || (fenceMatch[1][0] === fence.marker && fenceMatch[1].length >= fence.length && !fenceMatch[2].trim()))) {
+      if (code) {
+        if (options.diagrams && fence.language === 'mermaid') code.parentElement.dataset.diagram = 'mermaid';
+        code = undefined;
+      } else {
+        fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length, language: fenceMatch[2].trim().toLowerCase() };
         code = el('pre');
         const source = { text: '' }; codeSource = source;
         node.append(copyableCode(code, () => source.text));

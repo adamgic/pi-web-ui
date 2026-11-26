@@ -83,6 +83,38 @@ try {
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await cdp('Page.navigate', { url: server.url });
   await until(() => evaluate("document.getElementById('connection')?.textContent === 'Connected'"), 'UI connection');
+  const paneWidths = () => evaluate("({sidebar: document.getElementById('sidebar').getBoundingClientRect().width, main: document.querySelector('.workspace > main').getBoundingClientRect().width})");
+  const originalPanes = await paneWidths();
+  const divider = await evaluate("(() => { const r = document.getElementById('sidebar-resize').getBoundingClientRect(); return {x:r.x + r.width / 2,y:r.y + r.height / 2}; })()");
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', ...divider });
+  assert.equal(await evaluate("getComputedStyle(document.getElementById('sidebar-resize')).cursor"), 'ew-resize');
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('#sidebar-resize span')).opacity"), '1');
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', ...divider, button: 'left', clickCount: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: divider.x + 100, y: divider.y, button: 'left', buttons: 1 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: divider.x + 100, y: divider.y, button: 'left', clickCount: 1 });
+  const resizedPanes = await paneWidths();
+  assert.equal(resizedPanes.sidebar, originalPanes.sidebar + 100);
+  assert.equal(resizedPanes.main, originalPanes.main - 100);
+  await cdp('Page.reload');
+  await until(() => evaluate("document.getElementById('connection')?.textContent === 'Connected'"), 'resized reload');
+  assert.equal((await paneWidths()).sidebar, resizedPanes.sidebar, 'sidebar width survives reload');
+  await evaluate("document.getElementById('sidebar-resize').focus()");
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 });
+  assert.ok((await paneWidths()).sidebar <= 864 && (await paneWidths()).main >= 360);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Home', code: 'Home', windowsVirtualKeyCode: 36 });
+  assert.equal((await paneWidths()).sidebar, 180);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+  assert.equal((await paneWidths()).sidebar, 196);
+  await viewport(600, 700);
+  assert.equal(await evaluate("document.getElementById('sidebar-resize').checkVisibility()"), false);
+  assert.equal(await evaluate("document.getElementById('sidebar').checkVisibility()"), false);
+  await viewport(1440, 1000); await pause(100);
+  assert.equal((await paneWidths()).sidebar, 196);
+  await evaluate("document.getElementById('sidebar-resize').focus()");
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  assert.equal((await paneWidths()).sidebar, originalPanes.sidebar);
+  assert.equal(await evaluate("localStorage.getItem('pi-web-sidebar-width')"), null);
+  results.push({ test: 'Sidebar drag redistributes space, persists width, clamps limits, supports keyboard/reset and hides on mobile', status: 'pass' });
   const explorerRoot = `${profile}/explorer/root`;
   await mkdir(`${explorerRoot}/empty`, { recursive: true });
   await writeFile(`${explorerRoot}/My # Notes.md:12`, '# Explorer preview');
@@ -393,9 +425,11 @@ try {
   const chatSnippet = 'function greet(name) {\n\treturn `<Hello, ${name}>`;\n}\n\n// café\n';
   const unfinishedSnippet = 'echo "still streaming"';
   const responseMarkdown = `## Inspecting the project\nThe browser shares this Pi session.\n\n\`\`\`js\n${chatSnippet}\`\`\`\n\n\`\`\`sh\n${unfinishedSnippet}`;
+  const reasoningMarkdown = 'Inspect the **current branch**.\n\nKeep indentation:\n  - first step\n  - second step';
   bridge.update({
     type: 'message_update', message: {
       role: 'assistant', content: [
+        { type: 'thinking', thinking: reasoningMarkdown },
         { type: 'text', text: responseMarkdown },
         { type: 'toolCall', id: 'c1', name: 'read', arguments: { path: 'src/main.ts' } },
       ]
@@ -407,6 +441,14 @@ try {
   assert.ok(await evaluate("Math.abs(document.getElementById('expand').getBoundingClientRect().top + document.getElementById('expand').offsetHeight / 2 - document.getElementById('status').getBoundingClientRect().top - document.getElementById('status').offsetHeight / 2) < 2"));
   await evaluate("document.querySelector('.copy-response').click()");
   await until(async () => (await evaluate('navigator.clipboard.readText()')) === responseMarkdown, 'copy original response Markdown');
+  assert.equal(await evaluate("document.querySelector('.message.assistant .thinking-card').open"), false);
+  await evaluate("document.querySelector('[aria-label=\"Copy reasoning\"]').focus()");
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('[aria-label=\"Copy reasoning\"]')).opacity"), '1');
+  await cdp('Runtime.evaluate', { expression: "document.querySelector('[aria-label=\"Copy reasoning\"]').click()", userGesture: true });
+  await until(async () => await evaluate('navigator.clipboard.readText()') === reasoningMarkdown, 'copy complete reasoning Markdown');
+  assert.equal(await evaluate("document.querySelector('.message.assistant .thinking-card').open"), false, 'copy does not toggle reasoning');
+  await cdp('Runtime.evaluate', { expression: "document.querySelector('.message.user .copy-message').click()", userGesture: true });
+  await until(async () => await evaluate('navigator.clipboard.readText()') === '<img src=x onerror=alert(1)> test', 'copy user message');
   await verifyCodeCopy('.message.assistant .code-block:first-of-type', chatSnippet);
   await verifyCodeCopy('.message.assistant .code-block:last-child', unfinishedSnippet);
   await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/chat-code-copy.png`, Buffer.from(result.data, 'base64')));
@@ -702,6 +744,25 @@ try {
   await evaluate('navigator.clipboard.writeText = window.originalWriteText; delete window.originalWriteText');
   results.push({ test: 'Hover and keyboard code copying in chat, streamed fences, tool output and Markdown previews; multiple snippets, exact whitespace and clipboard failures', status: 'pass' });
   const mathFixture = await readFile(`${root}test/fixtures/tidal-forces.md`, 'utf8');
+  const diagramFixture = await readFile(`${root}test/fixtures/diagrams.md`, 'utf8');
+  await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/diagrams.md` })}#token=${server.token}` });
+  await until(() => evaluate("document.querySelectorAll('.diagram-block[data-rendered=true]').length === 2 && document.querySelectorAll('.diagram-block[data-rendered=error]').length === 1"), 'sequence/flowchart diagrams and invalid-source fallback');
+  assert.equal(await evaluate("document.querySelectorAll('iframe.diagram-preview').length"), 3);
+  assert.equal(await evaluate("document.querySelector('.diagram-preview').getAttribute('sandbox')"), 'allow-scripts');
+  assert.equal(await evaluate("document.querySelector('.diagram-preview').contentDocument"), null, 'diagram cannot access authenticated document origin');
+  assert.equal(await evaluate("document.querySelector('.diagram-source').open"), false);
+  await evaluate("document.querySelector('.diagram-source').open = true");
+  await verifyCodeCopy('.diagram-source .code-block', 'sequenceDiagram\n    participant Browser\n    participant Pi\n    Browser->>Pi: Send prompt\n    Pi-->>Browser: Stream response\n');
+  assert.equal(await evaluate("document.querySelector('.diagram-block[data-rendered=error] .diagram-source').open"), true);
+  assert.match(await evaluate("document.querySelector('#content > .prose > .code-block pre').textContent"), /This remains code/);
+  await evaluate("document.querySelector('.diagram-source').open = false; scrollTo(0, 0)");
+  await cdp('Page.captureScreenshot', { format: 'png' }).then(result => writeFile(`${out}/mermaid-preview.png`, Buffer.from(result.data, 'base64')));
+  await evaluate("document.getElementById('toggle').click()");
+  assert.equal(await evaluate("document.querySelector('.source-code').textContent"), diagramFixture);
+  assert.equal(await evaluate("document.querySelectorAll('.diagram-preview').length"), 0);
+  await evaluate("document.getElementById('toggle').click()");
+  await until(() => evaluate("document.querySelectorAll('.diagram-block[data-rendered=true]').length === 2"), 'diagrams restored after source toggle');
+  results.push({ test: 'Offline Mermaid sequence and flowchart previews, isolated rendering, source copying, invalid syntax fallback and source toggle', status: 'pass' });
   const expectedMath = [...mathFixture.matchAll(/\$\$[\s\S]+?\$\$|\$[^$\n]+?\$/g)].length;
   await cdp('Page.navigate', { url: `${server.origin}/preview.html?${new URLSearchParams({ path: `${root}test/fixtures/tidal-forces.md` })}#token=${server.token}` });
   await until(() => evaluate("document.querySelectorAll('#content math').length > 0"), 'tidal equations');

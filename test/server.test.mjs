@@ -26,6 +26,11 @@ test('authenticated HTTP, SSE, replay protection, input limits and shutdown', as
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   }
+  const renderer = await fetch(`${web.origin}/diagram.html`);
+  assert.equal(renderer.status, 200);
+  assert.match(renderer.headers.get('content-security-policy'), /connect-src 'none'/);
+  assert.match(renderer.headers.get('content-security-policy'), /frame-ancestors 'self'/);
+  assert.doesNotMatch((await fetch(web.origin)).headers.get('content-security-policy'), /unsafe-inline/);
   const stream = await fetch(`${web.origin}/api/events`, { headers });
   const reader = stream.body.getReader();
   assert.match(new TextDecoder().decode((await reader.read()).value), /test-session/);
